@@ -1,0 +1,206 @@
+version: "3.9"
+
+# =============================================================
+# Covenexa — Docker Compose (Development)
+# =============================================================
+# Services:
+#   postgres    — Primary relational database (PostgreSQL 16)
+#   neo4j       — Knowledge graph database (Neo4j Community 5)
+#   redis       — Cache, Event Bus, Shared Memory (Redis 7)
+#   pgadmin     — PostgreSQL admin UI
+#   backend     — FastAPI application
+#   mcp_server  — MCP Server (AI agent gateway)
+# =============================================================
+
+networks:
+  covenexa_net:
+    driver: bridge
+    name: covenexa_network
+
+volumes:
+  postgres_data:
+    name: covenexa_postgres_data
+  neo4j_data:
+    name: covenexa_neo4j_data
+  neo4j_logs:
+    name: covenexa_neo4j_logs
+  neo4j_import:
+    name: covenexa_neo4j_import
+  neo4j_plugins:
+    name: covenexa_neo4j_plugins
+  redis_data:
+    name: covenexa_redis_data
+  pgadmin_data:
+    name: covenexa_pgadmin_data
+  uploads_data:
+    name: covenexa_uploads_data
+
+services:
+
+  # ── POSTGRESQL ───────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: covenexa_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-covenexa_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-covenexa_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-covenexa}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - covenexa_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-covenexa_user} -d ${POSTGRES_DB:-covenexa}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── NEO4J ────────────────────────────────────────────────────
+  neo4j:
+    image: neo4j:5-community
+    container_name: covenexa_neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/covenexa_neo4j_pass}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_dbms_security_procedures_allowlist: apoc.*
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_server_memory_pagecache__size: 512m
+      NEO4J_dbms_connector_bolt_listen__address: 0.0.0.0:7687
+      NEO4J_dbms_connector_http_listen__address: 0.0.0.0:7474
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_plugins:/plugins
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    networks:
+      - covenexa_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ── REDIS ────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: covenexa_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-covenexa_redis_pass}
+      --appendonly yes
+      --appendfilename appendonly.aof
+      --loglevel notice
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - covenexa_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-covenexa_redis_pass}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── PGADMIN ──────────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: covenexa_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@covenexa.ai}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-covenexa_pgadmin_pass}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "5050:80"
+    networks:
+      - covenexa_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── BACKEND ──────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: covenexa_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-covenexa_user}:${POSTGRES_PASSWORD:-covenexa_pass}@postgres:5432/${POSTGRES_DB:-covenexa}
+      NEO4J_URI: bolt://neo4j:7687
+      REDIS_URL: redis://:${REDIS_PASSWORD:-covenexa_redis_pass}@redis:6379/0
+      MCP_SERVER_URL: http://mcp_server:8001
+    volumes:
+      - ./backend:/app
+      - uploads_data:/app/uploads
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    networks:
+      - covenexa_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mcp_server:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --log-level info
+
+  # ── MCP SERVER ───────────────────────────────────────────────
+  mcp_server:
+    build:
+      context: ./mcp_server
+      dockerfile: Dockerfile
+    container_name: covenexa_mcp_server
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-covenexa_user}:${POSTGRES_PASSWORD:-covenexa_pass}@postgres:5432/${POSTGRES_DB:-covenexa}
+      NEO4J_URI: bolt://neo4j:7687
+      REDIS_URL: redis://:${REDIS_PASSWORD:-covenexa_redis_pass}@redis:6379/0
+    volumes:
+      - ./mcp_server:/app
+      - uploads_data:/app/uploads
+    ports:
+      - "${MCP_SERVER_PORT:-8001}:8001"
+    networks:
+      - covenexa_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:8001/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s

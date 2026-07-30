@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'covenexa'
+
+scrape_configs:
+  - job_name: 'covenexa-backend'
+    static_configs:
+      - targets: ['backend:8000']
+    metrics_path: /metrics
+
+  - job_name: 'covenexa-mcp-server'
+    static_configs:
+      - targets: ['mcp_server:8001']
+    metrics_path: /metrics
+
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']

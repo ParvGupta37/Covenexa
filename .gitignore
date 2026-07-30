@@ -1,0 +1,113 @@
+# =============================================================
+# Covenexa — .gitignore
+# =============================================================
+
+# ── ENVIRONMENT ───────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.env
+
+# ── PYTHON ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+coverage.xml
+*.cover
+*.py,cover
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ruff
+.ruff_cache/
+
+# ── NODE / FRONTEND ──────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+frontend/dist/
+frontend/build/
+frontend/.vite/
+
+# ── DOCKER ───────────────────────────────────────────────────
+# Do not ignore docker-compose.yml — it is version controlled.
+# Data volumes are managed by Docker, not git.
+uploads/
+
+# ── UPLOADS / GENERATED FILES ────────────────────────────────
+uploads/
+reports/
+*.pdf
+*.docx
+*.xlsx
+
+# ── IDE / EDITORS ─────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+
+# ── LOGS ─────────────────────────────────────────────────────
+logs/
+*.log
+*.log.*
+
+# ── ALEMBIC ──────────────────────────────────────────────────
+# Keep migrations — do NOT gitignore versions/
+
+# ── MONITORING ───────────────────────────────────────────────
+infrastructure/monitoring/grafana/data/
+
+# ── SECRETS / KEYS ───────────────────────────────────────────
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
