@@ -42,6 +42,7 @@ class CreateLoanHandler:
         )
 
         result = await self._loan_repo.add(loan)
+        await self._loan_repo._session.commit()
         logger.info("loan.created", loan_id=result.id, borrower_id=result.borrower_id)
         return result
 

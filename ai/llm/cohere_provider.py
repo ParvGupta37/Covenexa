@@ -40,6 +40,23 @@ class CohereProvider(LLMProvider):
         )
         return result.get("text", "")
 
+    async def generate_response(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.0,
+        max_tokens: int = 2048,
+        **kwargs: Any,
+    ) -> str:
+        """Alias for generate() to support BaseAgent / Agent invocations."""
+        return await self.generate(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+
     async def generate_chat(
         self,
         messages: List[Dict[str, str]],

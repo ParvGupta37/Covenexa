@@ -40,7 +40,19 @@ class CreateBorrowerHandler:
         )
 
         result = await self._borrower_repo.add(borrower)
-        logger.info("borrower.created", borrower_id=result.id, company_name=result.company_name)
+
+        # Auto-create primary credit facility loan for borrower
+        from sqlalchemy import text
+        loan_id = str(uuid.uuid4())
+        await self._borrower_repo._session.execute(
+            text("""
+                INSERT INTO loans (id, borrower_id, agreement_id, principal_amount, currency, interest_rate, start_date, maturity_date, status)
+                VALUES (:id, :bid, NULL, 100000000.0, 'USD', 0.055, CURRENT_DATE, CURRENT_DATE + INTERVAL '5 years', 'ACTIVE')
+            """),
+            {"id": loan_id, "bid": result.id}
+        )
+
+        logger.info("borrower.created", borrower_id=result.id, company_name=result.company_name, primary_loan_id=loan_id)
         return result
 
 

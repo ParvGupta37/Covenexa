@@ -27,6 +27,59 @@ def _map_agreement(r: dict) -> dict:
     return d
 
 
+# ── GET /documents/loan/{loan_id} (Must come BEFORE /{agreement_id}) ──────────
+@router.get(
+    "/loan/{loan_id}",
+    response_model=List[DocumentStatusSchema],
+    dependencies=[Depends(require_role(_ALLOWED_ROLES))],
+)
+async def list_documents_for_loan(
+    loan_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_db_session),
+) -> List[DocumentStatusSchema]:
+    """List all agreements/documents uploaded for a specific loan with pagination."""
+    limit = max(1, min(500, limit))
+    offset = max(0, offset)
+    result = await session.execute(
+        text("SELECT * FROM agreements WHERE loan_id = :loan_id ORDER BY upload_date DESC LIMIT :limit OFFSET :offset"),
+        {"loan_id": loan_id, "limit": limit, "offset": offset},
+    )
+    rows = result.mappings().all()
+    return [DocumentStatusSchema(**_map_agreement(r)) for r in rows]
+
+
+# ── GET /documents/borrower/{borrower_id} ──────────────────────────────────────
+@router.get(
+    "/borrower/{borrower_id}",
+    response_model=List[DocumentStatusSchema],
+    dependencies=[Depends(require_role(_ALLOWED_ROLES))],
+)
+async def list_documents_for_borrower(
+    borrower_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_db_session),
+) -> List[DocumentStatusSchema]:
+    """List all agreements/documents uploaded for a borrower across all facilities with pagination."""
+    limit = max(1, min(500, limit))
+    offset = max(0, offset)
+    result = await session.execute(
+        text("""
+            SELECT a.* 
+            FROM agreements a
+            JOIN loans l ON a.loan_id = l.id
+            WHERE l.borrower_id = :borrower_id
+            ORDER BY a.upload_date DESC
+            LIMIT :limit OFFSET :offset
+        """),
+        {"borrower_id": borrower_id, "limit": limit, "offset": offset},
+    )
+    rows = result.mappings().all()
+    return [DocumentStatusSchema(**_map_agreement(r)) for r in rows]
+
+
 # ── GET /documents/{agreement_id} ──────────────────────────────────────────────
 @router.get(
     "/{agreement_id}",
@@ -46,25 +99,6 @@ async def get_document_status(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agreement not found.")
     return DocumentStatusSchema(**_map_agreement(row))
-
-
-# ── GET /documents/loan/{loan_id} ──────────────────────────────────────────────
-@router.get(
-    "/loan/{loan_id}",
-    response_model=List[DocumentStatusSchema],
-    dependencies=[Depends(require_role(_ALLOWED_ROLES))],
-)
-async def list_documents_for_loan(
-    loan_id: str,
-    session: AsyncSession = Depends(get_db_session),
-) -> List[DocumentStatusSchema]:
-    """List all agreements/documents uploaded for a specific loan."""
-    result = await session.execute(
-        text("SELECT * FROM agreements WHERE loan_id = :loan_id ORDER BY upload_date DESC"),
-        {"loan_id": loan_id},
-    )
-    rows = result.mappings().all()
-    return [DocumentStatusSchema(**_map_agreement(r)) for r in rows]
 
 
 # ── GET /documents/{agreement_id}/chunks ───────────────────────────────────────

@@ -1,5 +1,15 @@
 """
-Portfolio Agent (Stub).
+Portfolio Agent (Unimplemented Scaffold).
+
+STATUS: NOT IMPLEMENTED.
+This agent is a Sprint-3 planning scaffold. It is not called by any active API
+path. The actual health-score calculation is performed by HealthScoreEngine
+(ai/engines/health_score_engine.py), which is wired into RiskIntelligencePipeline.
+
+DO NOT use this agent to retrieve portfolio health data; use the
+  GET /api/v1/risk/health/{borrower_id}  endpoint instead.
+
+DO NOT remove this file — it is referenced in Sprint planning documents.
 """
 from typing import Any, Dict
 from ai.agents.base_agent import BaseAgent
@@ -7,7 +17,8 @@ from ai.agents.base_agent import BaseAgent
 
 class PortfolioAgent(BaseAgent):
     """
-    Fleshed out in Sprint 3 with health score and default prediction formulas.
+    Unimplemented placeholder.
+    Real portfolio health scoring is in ai/engines/health_score_engine.py.
     """
 
     @property
@@ -15,5 +26,9 @@ class PortfolioAgent(BaseAgent):
         return "PortfolioAgent"
 
     async def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        state.update({"portfolio_health_score": 85})
-        return state
+        # MEDIUM-2: Removed hardcoded portfolio_health_score = 85.
+        # An unimplemented agent must never emit an invented business value.
+        raise NotImplementedError(
+            "PortfolioAgent is an unimplemented scaffold. "
+            "Use HealthScoreEngine / GET /api/v1/risk/health/{borrower_id} instead."
+        )

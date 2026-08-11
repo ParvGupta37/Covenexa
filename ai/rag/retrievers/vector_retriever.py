@@ -1,6 +1,6 @@
 """
 Pinecone vector semantic retriever.
-Generates query embeddings using Cohere and performs similarity search in Pinecone.
+Generates query embeddings using Cohere Embed v3 and performs similarity search in Pinecone.
 """
 from typing import Any, List
 import structlog
@@ -14,7 +14,7 @@ logger = structlog.get_logger(__name__)
 
 class VectorRetriever(BaseRetriever):
     """
-    Retrieves semantically similar document chunks from Pinecone.
+    Retrieves semantically similar agreement and document passages from Pinecone.
     """
 
     def __init__(self, pinecone_client: PineconeClient | None = None, cohere_client: CohereClient | None = None) -> None:
@@ -23,37 +23,49 @@ class VectorRetriever(BaseRetriever):
             environment=settings.PINECONE_ENVIRONMENT,
             index_name=settings.PINECONE_INDEX_NAME,
         )
-        self._pinecone.initialize()
-
         self._cohere = cohere_client or CohereClient(api_key=settings.COHERE_API_KEY)
-        self._cohere.initialize()
 
     async def retrieve(self, query: str, limit: int = 5, **kwargs: Any) -> List[dict]:
         logger.info("vector.retrieve", query=query, limit=limit)
+        borrower_id = kwargs.get("borrower_id")
+
         try:
-            # 1. Embed query
+            self._pinecone.initialize()
+            self._cohere.initialize()
+
+            # 1. Embed search query using Cohere
             embeddings = await self._cohere.embed([query], input_type="search_query")
             if not embeddings:
                 return []
-            
-            # 2. Query Pinecone
+
+            # 2. Build metadata filter
+            filter_dict = {}
+            if borrower_id:
+                filter_dict["borrower_id"] = borrower_id
+
+            # 3. Query Pinecone (Strictly tenant-isolated when borrower_id is provided)
             matches = await self._pinecone.query(
                 embedding=embeddings[0],
                 top_k=limit,
-                filter=kwargs.get("filter")
+                filter=filter_dict if filter_dict else None
             )
 
-            # 3. Format results
+            # 4. Format results
             results = []
             for match in matches:
                 metadata = match.get("metadata", {})
+                score = match.get("score", 0.0)
+                text_content = metadata.get("text") or metadata.get("content") or f"Document Chunk ID: {match.get('id')}"
+                page_num = metadata.get("page_number") or metadata.get("page") or "?"
+                section_name = metadata.get("section") or "General"
+
                 results.append({
-                    "source": "vector_database",
-                    "content": f"Page {metadata.get('page_number', '?')} (Section: {metadata.get('section', 'General')}): {metadata.get('text', 'Content missing')}" if "text" in metadata else f"Chunk ID: {match.get('id')}",
-                    "score": match.get("score", 0.0),
+                    "source": "pinecone_vector",
+                    "content": f"[Document Passage | Page {page_num}, Section '{section_name}']: {text_content}",
+                    "score": round(score, 4),
                     "metadata": metadata,
                 })
             return results
         except Exception as exc:
-            logger.error("vector.retrieve_failed", error=str(exc))
+            logger.warning("vector.retrieve_failed", error=str(exc))
             return []

@@ -15,6 +15,9 @@ from app.infrastructure.repositories.organization_repository_impl import Organiz
 router = APIRouter(prefix="/organizations", tags=["Organizations"])
 
 
+_ALLOWED_ROLES = [UserRole.ADMIN, UserRole.MANAGER, UserRole.ANALYST]
+
+
 @router.post(
     "/",
     response_model=OrganizationResponseSchema,
@@ -27,7 +30,7 @@ async def create_organization(
 ) -> Organization:
     """Create a new Organization. Restricted to ADMIN role."""
     repo = OrganizationRepositoryImpl(session)
-    
+
     existing = await repo.get_by_name(payload.name)
     if existing:
         raise EntityAlreadyExistsException("Organization", payload.name)
@@ -40,7 +43,11 @@ async def create_organization(
     return await repo.add(org)
 
 
-@router.get("/", response_model=list[OrganizationResponseSchema])
+@router.get(
+    "/",
+    response_model=list[OrganizationResponseSchema],
+    dependencies=[Depends(require_role(_ALLOWED_ROLES))],
+)
 async def list_organizations(session: AsyncSession = Depends(get_db_session)) -> list[Organization]:
     """List all organizations."""
     repo = OrganizationRepositoryImpl(session)

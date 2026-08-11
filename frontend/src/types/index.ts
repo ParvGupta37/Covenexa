@@ -37,7 +37,7 @@ export interface Money {
 export interface Loan {
   id: string;
   borrower_id: string;
-  agreement_id: string;
+  agreement_id?: string | null;
   principal_amount: Money;
   interest_rate: number;
   start_date: string;

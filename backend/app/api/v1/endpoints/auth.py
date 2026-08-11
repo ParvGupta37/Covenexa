@@ -47,7 +47,17 @@ async def login(
     command = LoginCommand(email=payload.email.lower(), password=payload.password)
     handler = LoginHandler(session)
     try:
-        return await handler.handle(command)
+        res = await handler.handle(command)
+        user_info = res.get("user", {})
+        from app.api.v1.endpoints.audit import log_audit_event
+        await log_audit_event(
+            action="user_login",
+            resource_type="auth",
+            user_id=user_info.get("id"),
+            user_email=payload.email,
+            details={"email": payload.email},
+        )
+        return res
     except AuthenticationException:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

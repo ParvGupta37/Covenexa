@@ -2,7 +2,7 @@
 Cohere integration client — Sprint 2 implementation.
 Provides:
   - LLM inference via Command A (command-a-03-2025)
-  - Embeddings via Embed v4 (embed-v4.0, 1024 dimensions)
+  - Embeddings via Embed v3 (embed-english-v3.0, 1024 dimensions)
 """
 import logging
 from typing import Any
@@ -62,13 +62,19 @@ class CohereClient:
 
             response = await self._client.chat(**kwargs)
             text = response.message.content[0].text if response.message.content else ""
+            usage_dict = {}
+            if hasattr(response, "usage") and response.usage:
+                billed = getattr(response.usage, "billed_units", None)
+                if billed:
+                    usage_dict = {
+                        "input_tokens": getattr(billed, "input_tokens", 0) or 0,
+                        "output_tokens": getattr(billed, "output_tokens", 0) or 0,
+                    }
+
             return {
                 "text": text,
                 "model": model,
-                "usage": {
-                    "input_tokens": getattr(response.usage, "billed_units", {}).get("input_tokens", 0),
-                    "output_tokens": getattr(response.usage, "billed_units", {}).get("output_tokens", 0),
-                } if hasattr(response, "usage") else {},
+                "usage": usage_dict,
             }
         except Exception as exc:
             logger.error("CohereClient.chat failed: %s", exc)
@@ -77,7 +83,7 @@ class CohereClient:
     async def embed(
         self,
         texts: list[str],
-        model: str = "embed-v4.0",
+        model: str = "embed-english-v3.0",
         input_type: str = "search_document",
     ) -> list[list[float]]:
         """
@@ -109,6 +115,16 @@ class CohereClient:
 
 def _mock_llm_response(message: str) -> str:
     """Return a clearly-labelled placeholder when Cohere is unavailable."""
+    msg_lower = message.lower()
+    if "user question:" in msg_lower or "copilot" in msg_lower:
+        return (
+            "**Credit Intelligence Analysis**\n\n"
+            "Based on the provided borrower database context:\n"
+            "- Covenant compliance and facility metrics are monitored.\n"
+            "- Where specific metrics or clauses are unavailable or marked N/A, please ingest updated financial statements or loan agreements.\n\n"
+            "*Note: Running in offline simulation mode (Cohere API key not configured).* "
+            "Insufficient data for certain fields is indicated in the citations."
+        )
     return (
         '{"_note": "Cohere API key not configured. This is a mock response.", '
         '"covenants": [], "financial_metrics": {}}'

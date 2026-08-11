@@ -15,6 +15,9 @@ from app.domain.entities.user import UserRole
 router = APIRouter(prefix="/borrowers", tags=["Borrowers"])
 
 
+_ALLOWED_ROLES = [UserRole.ADMIN, UserRole.MANAGER, UserRole.ANALYST]
+
+
 @router.post(
     "/",
     response_model=BorrowerResponseSchema,
@@ -38,18 +41,31 @@ async def create_borrower(
     return await handler.handle(command)
 
 
-@router.get("/", response_model=list[BorrowerResponseSchema])
+@router.get(
+    "/",
+    response_model=list[BorrowerResponseSchema],
+    dependencies=[Depends(require_role(_ALLOWED_ROLES))],
+)
 async def list_borrowers(
     organization_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
     session: AsyncSession = Depends(get_db_session),
 ) -> list[Borrower]:
-    """List all borrowers. Filter by organization_id if provided."""
+    """List all borrowers with pagination. Filter by organization_id if provided."""
+    limit = max(1, min(500, limit))
+    offset = max(0, offset)
     query = ListBorrowersQuery(organization_id=organization_id)
     handler = BorrowerQueryHandler(session)
-    return await handler.list_all(query)
+    borrowers = await handler.list_all(query)
+    return borrowers[offset: offset + limit]
 
 
-@router.get("/{borrower_id}", response_model=BorrowerResponseSchema)
+@router.get(
+    "/{borrower_id}",
+    response_model=BorrowerResponseSchema,
+    dependencies=[Depends(require_role(_ALLOWED_ROLES))],
+)
 async def get_borrower(
     borrower_id: str,
     session: AsyncSession = Depends(get_db_session),

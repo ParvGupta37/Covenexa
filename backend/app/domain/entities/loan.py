@@ -17,12 +17,12 @@ class LoanStatus(str, Enum):
 class Loan:
     id: str
     borrower_id: str
-    agreement_id: str
     principal_amount: Money
     interest_rate: float  # e.g., 0.085 for 8.5%
     start_date: date
     maturity_date: date
     status: LoanStatus
+    agreement_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.start_date >= self.maturity_date:

@@ -54,9 +54,12 @@ class RequestTimingMiddleware(BaseHTTPMiddleware):
                 duration=f"{process_time:.4f}s",
                 exc_info=True,
             )
+            body = {"detail": "An internal server error occurred."}
+            if settings.APP_ENV == "development":
+                body["error"] = str(exc)
             return JSONResponse(
                 status_code=500,
-                content={"detail": "An internal server error occurred.", "error": str(exc)},
+                content=body,
                 headers={"X-Request-ID": request_id, "X-Process-Time": f"{process_time:.4f}s"},
             )
 

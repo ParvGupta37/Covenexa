@@ -20,8 +20,8 @@ class LoanORM(Base):
     borrower_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("borrowers.id", ondelete="CASCADE"), nullable=False
     )
-    agreement_id: Mapped[str] = mapped_column(
-        String(36), nullable=False  # Handled separately to avoid complex DB constraint loops in initial schema
+    agreement_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("agreements.id", ondelete="SET NULL"), nullable=True
     )
     
     # Store principal amount money fields

@@ -12,13 +12,17 @@ import { ProtectedRoute } from "@/components/shared/ProtectedRoute";
 import { LoginPage } from "@/pages/auth/LoginPage";
 import { RegisterPage } from "@/pages/auth/RegisterPage";
 
-// Dashboard Pages
+// Dashboard & Intelligence Pages
 import DashboardPage from "@/pages/dashboard/DashboardPage";
+import RiskPage from "@/pages/risk/RiskPage";
+import CopilotPage from "@/pages/copilot/CopilotPage";
+import StressTestPage from "@/pages/stress/StressTestPage";
+import GraphPage from "@/pages/graph/GraphPage";
 import BorrowersPage from "@/pages/borrowers/BorrowersPage";
 import LoansPage from "@/pages/loans/LoansPage";
 import UploadsPage from "@/pages/uploads/UploadsPage";
 import DocumentDetailPage from "@/pages/documents/DocumentDetailPage";
-
+import AuditPage from "@/pages/audit/AuditPage";
 
 export default function App() {
   const setUser = useAuthStore((state) => state.setUser);
@@ -56,11 +60,15 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/risk" element={<RiskPage />} />
+          <Route path="/copilot" element={<CopilotPage />} />
+          <Route path="/stress" element={<StressTestPage />} />
+          <Route path="/graph" element={<GraphPage />} />
+          <Route path="/audit" element={<AuditPage />} />
           <Route path="/borrowers" element={<BorrowersPage />} />
           <Route path="/loans" element={<LoansPage />} />
           <Route path="/uploads" element={<UploadsPage />} />
           <Route path="/documents/:agreementId" element={<DocumentDetailPage />} />
-
         </Route>
       </Route>
 

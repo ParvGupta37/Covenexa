@@ -22,27 +22,50 @@ logger = structlog.get_logger(__name__)
 async def lifespan(app: FastAPI):
     """Lifecycle startup and teardown triggers."""
     logger.info("app.startup", environment=settings.APP_ENV, version=settings.APP_VERSION)
-    
+
     # Start Redis Event Bus listener for DocumentUploadedEvent
     from integrations.redis.client import RedisClient
     from event_bus.redis_event_bus import RedisEventBus
     from event_bus.handlers.document_handler import DocumentUploadedHandler
-    
+
     redis_client = RedisClient(url=settings.REDIS_URL)
     await redis_client.initialize()
     event_bus = RedisEventBus(redis_client)
     await event_bus.start()
-    
+
     handler = DocumentUploadedHandler()
     await event_bus.subscribe("DocumentUploadedEvent", handler.handle)
     app.state.event_bus = event_bus
     app.state.redis_client = redis_client
-    
+
+    # Initialize Neo4j driver once at startup (MEDIUM-3 lifecycle fix).
+    # The driver object is created regardless of Neo4j availability;
+    # actual connectivity errors surface at query time, not here.
+    from integrations.neo4j.client import Neo4jClient
+    neo4j_client = Neo4jClient(
+        uri=settings.NEO4J_URI,
+        user=settings.NEO4J_USER,
+        password=settings.NEO4J_PASSWORD,
+    )
+    try:
+        neo4j_client.initialize()
+        logger.info("app.neo4j_driver_initialized")
+    except Exception as exc:
+        logger.warning("app.neo4j_driver_init_failed", error=str(exc))
+    app.state.neo4j_client = neo4j_client
+
     yield
-    
+
     logger.info("app.shutdown")
     await event_bus.stop()
     await redis_client.close()
+    # Dispose Neo4j driver cleanly on shutdown.
+    try:
+        await neo4j_client.dispose()
+        logger.info("app.neo4j_driver_disposed")
+    except Exception as exc:
+        logger.warning("app.neo4j_driver_dispose_failed", error=str(exc))
+
 
 
 # ── FASTAPI FACTORY ────────────────────────────────────────────────
@@ -78,7 +101,10 @@ async def root_health():
 @app.exception_handler(Exception)
 async def catch_unhandled_exceptions(request: Request, exc: Exception) -> JSONResponse:
     logger.error("app.unhandled_error", path=request.url.path, error=str(exc), exc_info=True)
+    body = {"detail": "An internal server error occurred."}
+    if settings.APP_ENV == "development":
+        body["error"] = str(exc)
     return JSONResponse(
         status_code=500,
-        content={"detail": "An internal server error occurred.", "error": str(exc)},
+        content=body,
     )

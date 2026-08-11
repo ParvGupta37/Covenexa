@@ -126,6 +126,23 @@ class DocumentWorkflow(BaseWorkflow):
         # Run StateGraph
         final_state = await self._graph.ainvoke(initial_state)
         logger.info("document_workflow.execute_complete", status=final_state.get("status"))
+
+        # Trigger full Risk Intelligence pipeline recalculation when document parsing succeeds
+        if final_state.get("status") in ["done", "complete"] and borrower_id:
+            try:
+                from ai.engines.pipeline_runner import RiskIntelligencePipeline
+                from integrations.postgres.client import PostgresClient
+                from app.core.config import settings
+
+                pg_client = PostgresClient(settings.DATABASE_URL)
+                pg_client.initialize()
+                async with pg_client.session() as session:
+                    pipeline = RiskIntelligencePipeline()
+                    await pipeline.run_full_pipeline(session, borrower_id)
+                logger.info("document_workflow.risk_pipeline_auto_triggered", borrower_id=borrower_id)
+            except Exception as exc:
+                logger.error("document_workflow.auto_trigger_failed", error=str(exc))
+
         return final_state
 
     # ── NODE RUNNERS ────────────────────────────────────────────────

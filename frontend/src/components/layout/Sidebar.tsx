@@ -1,5 +1,8 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Users, FileStack, ShieldAlert, LogOut, Sparkles } from "lucide-react";
+import {
+  LayoutDashboard, Users, FileStack, ShieldAlert, LogOut, Sparkles,
+  Activity, BrainCircuit, Sliders, Network, History
+} from "lucide-react";
 import { useAuthStore } from "@/store/auth.store";
 
 export function Sidebar() {
@@ -9,9 +12,14 @@ export function Sidebar() {
 
   const navItems = [
     { label: "Dashboard", path: "/", icon: LayoutDashboard },
+    { label: "Risk Analytics", path: "/risk", icon: Activity },
+    { label: "AI Copilot", path: "/copilot", icon: BrainCircuit },
+    { label: "Stress Testing", path: "/stress", icon: Sliders },
+    { label: "Knowledge Graph", path: "/graph", icon: Network },
+    { label: "Audit & Logs", path: "/audit", icon: History },
     { label: "Borrowers", path: "/borrowers", icon: Users },
-    { label: "Loans & Covenants", path: "/loans", icon: ShieldAlert },
-    { label: "File Ingestion", path: "/uploads", icon: FileStack },
+    { label: "Loans & Facilities", path: "/loans", icon: ShieldAlert },
+    { label: "Ingestion & SEC", path: "/uploads", icon: FileStack },
   ];
 
   const handleLogout = () => {
@@ -21,7 +29,7 @@ export function Sidebar() {
 
   return (
     <aside className="w-64 bg-card border-r border-border min-h-screen flex flex-col justify-between py-6 px-4 shrink-0">
-      <div className="space-y-8">
+      <div className="space-y-6">
         {/* Logo */}
         <div className="flex items-center gap-3 px-2">
           <Sparkles className="w-7 h-7 text-primary animate-pulse" />
@@ -41,7 +49,7 @@ export function Sidebar() {
                 to={item.path}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   isActive
-                    ? "bg-primary text-primary-foreground"
+                    ? "bg-primary text-primary-foreground font-semibold"
                     : "text-muted-foreground hover:bg-accent hover:text-foreground"
                 }`}
               >
@@ -53,7 +61,7 @@ export function Sidebar() {
         </nav>
       </div>
 
-      {/* User Session profile block */}
+      {/* User Profile */}
       <div className="space-y-4 pt-4 border-t border-border">
         {user && (
           <div className="px-3 py-2">

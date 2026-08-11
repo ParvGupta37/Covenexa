@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     # Cohere
     COHERE_API_KEY: str = ""
     COHERE_LLM_MODEL: str = "command-a-03-2025"
-    COHERE_EMBED_MODEL: str = "embed-v4.0"
+    COHERE_EMBED_MODEL: str = "embed-english-v3.0"
 
     # Llama Parse / Cloud
     LLAMA_CLOUD_API_KEY: str = ""
