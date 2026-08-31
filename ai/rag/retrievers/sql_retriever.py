@@ -226,3 +226,7 @@ class SqlRetriever(BaseRetriever):
             logger.error("sql.retrieve_failed", error=str(exc))
 
         return results
+
+
+# Canonical alias for case-insensitive naming compatibility
+SQLRetriever = SqlRetriever
