@@ -41,7 +41,8 @@ class UserRepositoryImpl(UserRepository):
         orm.name = entity.name
         orm.email = str(entity.email)
         orm.password_hash = entity.password_hash
-        orm.role = entity.role.value
+        orm.role = entity.role.value if hasattr(entity.role, "value") else str(entity.role)
+        orm.organization_id = entity.organization_id
         
         await self._session.flush()
         return orm.to_entity()
@@ -60,3 +61,9 @@ class UserRepositoryImpl(UserRepository):
         )
         orm = result.scalar_one_or_none()
         return orm.to_entity() if orm else None
+
+    async def get_by_organization_id(self, organization_id: str) -> list[User]:
+        result = await self._session.execute(
+            select(UserORM).where(UserORM.organization_id == organization_id).order_by(UserORM.created_at.asc())
+        )
+        return [orm.to_entity() for orm in result.scalars().all()]

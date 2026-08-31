@@ -42,43 +42,59 @@ class CohereClient:
         model: str = "command-a-03-2025",
         documents: list[dict[str, Any]] | None = None,
         system_prompt: str | None = None,
+        temperature: float = 0.3,
     ) -> dict[str, Any]:
         """
-        Send a chat message to Cohere Command A.
+        Send a chat message to Cohere Command A with retry and non-empty guarantees.
         Returns {"text": str, "model": str, "usage": dict}.
         """
         if not self._available or self._client is None:
             return {"text": _mock_llm_response(message), "model": "mock", "usage": {}}
 
-        try:
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": message})
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": message})
 
-            kwargs: dict[str, Any] = {"model": model, "messages": messages}
-            if documents:
-                kwargs["documents"] = documents
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if documents:
+            kwargs["documents"] = documents
 
-            response = await self._client.chat(**kwargs)
-            text = response.message.content[0].text if response.message.content else ""
-            usage_dict = {}
-            if hasattr(response, "usage") and response.usage:
-                billed = getattr(response.usage, "billed_units", None)
-                if billed:
-                    usage_dict = {
-                        "input_tokens": getattr(billed, "input_tokens", 0) or 0,
-                        "output_tokens": getattr(billed, "output_tokens", 0) or 0,
+        last_error = None
+        for attempt in range(2):
+            try:
+                response = await self._client.chat(**kwargs)
+                text = response.message.content[0].text if response.message.content else ""
+                if text and len(text.strip()) > 5:
+                    usage_dict = {}
+                    if hasattr(response, "usage") and response.usage:
+                        billed = getattr(response.usage, "billed_units", None)
+                        if billed:
+                            usage_dict = {
+                                "input_tokens": getattr(billed, "input_tokens", 0) or 0,
+                                "output_tokens": getattr(billed, "output_tokens", 0) or 0,
+                            }
+                    return {
+                        "text": text,
+                        "model": model,
+                        "usage": usage_dict,
                     }
+                logger.warning("CohereClient.chat returned short/empty content '%s', retrying attempt %d", text, attempt + 1)
+            except Exception as exc:
+                last_error = exc
+                logger.warning("CohereClient.chat attempt %d failed: %s", attempt + 1, exc)
 
-            return {
-                "text": text,
-                "model": model,
-                "usage": usage_dict,
-            }
-        except Exception as exc:
-            logger.error("CohereClient.chat failed: %s", exc)
-            return {"text": "", "model": model, "usage": {}, "error": str(exc)}
+        logger.error("CohereClient.chat failed after retries: %s", last_error)
+        return {
+            "text": "",
+            "model": model,
+            "usage": {},
+            "error": str(last_error) if last_error else "empty_response",
+        }
 
     async def embed(
         self,

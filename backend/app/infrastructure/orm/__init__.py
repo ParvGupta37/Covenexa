@@ -21,6 +21,9 @@ from app.infrastructure.orm.document_chunk_orm import DocumentChunkORM
 from app.infrastructure.orm.covenant_orm import CovenantORM
 from app.infrastructure.orm.financial_metric_orm import FinancialMetricORM
 
+from app.infrastructure.orm.invitation_orm import InvitationORM
+from app.infrastructure.orm.copilot_orm import CopilotConversationORM, CopilotMessageORM
+
 __all__ = [
     "Base",
     "UserORM",
@@ -28,6 +31,7 @@ __all__ = [
     "BorrowerORM",
     "LoanORM",
     "AgreementORM",
+    "InvitationORM",
     # FinancialStatementORM — DEPRECATED (Sprint-1): superseded by FinancialMetricORM.
     # ComplianceResultORM  — DEPRECATED (Sprint-1): superseded by covenant_monitoring.
     # Neither is exported here to avoid misleading active use.
@@ -36,4 +40,7 @@ __all__ = [
     "DocumentChunkORM",
     "CovenantORM",
     "FinancialMetricORM",
+    # Copilot History & Conversations
+    "CopilotConversationORM",
+    "CopilotMessageORM",
 ]

@@ -3,6 +3,7 @@ import api from "@/lib/api";
 
 export interface Company {
   id: string;
+  organization_id?: string;
   company_name: string;
   sector: string;
   country: string;
@@ -29,6 +30,7 @@ interface CompanyState {
   openRegisterModal: () => void;
   closeRegisterModal: () => void;
   registerCompany: (data: RegisterPayload) => Promise<Company>;
+  clearCompanies: () => void;
 }
 
 // Read persisted selection
@@ -72,6 +74,11 @@ export const useCompanyStore = create<CompanyState>((set, get) => ({
   openRegisterModal: () => set({ isRegisterModalOpen: true }),
   closeRegisterModal: () => set({ isRegisterModalOpen: false }),
 
+  clearCompanies: () => {
+    set({ companies: [], selectedCompanyId: "", selectedCompany: null });
+    localStorage.removeItem("selected_company_id");
+  },
+
   registerCompany: async ({ company_name, sector, country, risk_level, risk_score }) => {
     set({ loading: true });
     try {
@@ -93,21 +100,10 @@ export const useCompanyStore = create<CompanyState>((set, get) => ({
         risk_rating: { level: risk_level, score: risk_score },
       });
       const newBorrower: Company = resB.data;
-
-      // Create a default credit facility for this borrower.
-      // agreement_id is intentionally omitted — the field is nullable and
-      // a real agreement ID will be set when the first document is uploaded.
-      // Never fabricate an agreement identifier.
-      const today = new Date().toISOString().split("T")[0];
-      const maturity = new Date(Date.now() + 5 * 365 * 86400 * 1000).toISOString().split("T")[0];
-      await api.post("/api/v1/loans/", {
-        borrower_id: newBorrower.id,
-        principal_amount: { amount: 100000000.0, currency: "USD" },
-        interest_rate: 0.065,
-        start_date: today,
-        maturity_date: maturity,
-        status: "ACTIVE",
-      }).catch(() => null); // non-fatal: handler auto-creates a facility too
+      // NOTE: No auto-loan creation here.
+      // Loans represent real credit facilities with real terms.
+      // The user must create them explicitly via the Loans page.
+      // A new borrower correctly starts with 0 loans.
 
       await get().fetchCompanies();
       get().setSelectedCompanyId(newBorrower.id);

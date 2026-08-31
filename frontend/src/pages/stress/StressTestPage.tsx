@@ -1,55 +1,159 @@
 import { useState, useEffect } from "react";
-import { Sliders, Play, AlertTriangle, ShieldCheck, BarChart2, RefreshCw, Info } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, Cell } from "recharts";
+import { Sliders, Play, AlertTriangle, ShieldCheck, RefreshCw } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import api from "@/lib/api";
 import { useCompanyStore } from "@/store/company.store";
+import { ImprovedEmptyState, InfoTooltip } from "@/components/shared/Explainer";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 interface StressResult {
   projected_health_score: number | null;
   projected_default_prob: number | null;
   covenant_breaches_count: number;
   at_risk: boolean | null;
   calculation_status: "valid" | "partial_data" | "insufficient_data";
-  data_quality: {
-    ebitda_available: boolean;
-    revenue_available: boolean;
-    debt_available: boolean;
-    interest_available: boolean;
-    leverage_calculable: boolean;
-    coverage_calculable: boolean;
-  };
   caveats: string[];
   details: {
-    baseline: { leverage: number | null; coverage: number | null };
-    stressed: {
-      revenue: number;
-      ebitda: number | null;
-      debt: number;
+    baseline: {
+      revenue?: number | null;
+      debt?: number | null;
       leverage: number | null;
       coverage: number | null;
+    };
+    stressed: {
+      revenue: number | null;
+      ebitda: number | null;
+      debt: number | null;
+      interest?: number | null;
+      leverage: number | null;
+      coverage: number | null;
+    };
+    covenants_summary?: {
+      total: number;
+      breaches: number;
+      unknown: number;
+      compliant: number;
     };
   };
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-/** Display a financial ratio or "N/A" — never silently converts null → 0. */
-function fmtRatio(val: number | null | undefined): string {
-  if (val == null) return "N/A";
-  return `${val.toFixed(2)}x`;
+function formatFinancial(val: number | null | undefined, isCurrency = false): string {
+  if (val === null || val === undefined) return "N/A";
+  if (isCurrency) {
+    if (Math.abs(val) >= 1_000_000_000) {
+      return `$${(val / 1_000_000_000).toFixed(2)}B`;
+    }
+    if (Math.abs(val) >= 1_000_000) {
+      return `$${(val / 1_000_000).toFixed(2)}M`;
+    }
+    return `$${val.toLocaleString()}`;
+  }
+  return val.toFixed(2);
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  valid: "Full Calculation",
-  partial_data: "Partial Data",
-  insufficient_data: "Insufficient Data",
-};
+// Labelled slider with context
+function ScenarioSlider({
+  label,
+  tooltip,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  formatValue,
+  valueColor,
+}: {
+  label: string;
+  tooltip: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onChange: (v: number) => void;
+  formatValue: (v: number) => string;
+  valueColor: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between items-center text-xs font-semibold">
+        <span className="flex items-center gap-0.5 text-[#6B7280]">
+          {label}
+          <InfoTooltip text={tooltip} />
+        </span>
+        <span style={{ color: valueColor }} className="font-bold">
+          {formatValue(value)}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step || 1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-[#7C8DFB] cursor-pointer"
+      />
+      <div className="flex justify-between text-[10px] text-[#9CA3AF]">
+        <span>{formatValue(min)}</span>
+        <span>Baseline: 0%</span>
+        <span>{formatValue(max)}</span>
+      </div>
+    </div>
+  );
+}
 
-const STATUS_COLORS: Record<string, string> = {
-  valid: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-  partial_data: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  insufficient_data: "bg-red-500/10 text-red-400 border-red-500/20",
-};
+// Baseline vs Stressed comparison row
+function ComparisonRow({
+  label,
+  baseline,
+  stressed,
+  unit,
+  tooltip,
+  lowerIsBetter = false,
+  isCurrency = false,
+}: {
+  label: string;
+  baseline: number | null | undefined;
+  stressed: number | null | undefined;
+  unit?: string;
+  tooltip: string;
+  lowerIsBetter?: boolean;
+  isCurrency?: boolean;
+}) {
+  const hasBoth = baseline != null && stressed != null;
+  const change = hasBoth ? (stressed as number) - (baseline as number) : null;
+  const isWorse = change !== null ? (lowerIsBetter ? change > 0 : change < 0) : false;
+
+  return (
+    <div className="flex items-center justify-between py-2.5 border-b border-[#EEF1F5] last:border-0">
+      <span className="flex items-center gap-0.5 text-xs text-[#6B7280] font-medium">
+        {label}
+        <InfoTooltip text={tooltip} />
+      </span>
+      <div className="flex items-center gap-6 text-xs font-bold">
+        <div className="text-right min-w-[70px]">
+          <p className="text-[9px] text-[#9CA3AF] font-semibold uppercase tracking-wide">Baseline</p>
+          <p className="text-[#111827]">
+            {baseline != null ? `${formatFinancial(baseline, isCurrency)}${unit || ""}` : "N/A"}
+          </p>
+        </div>
+        <div className="text-right min-w-[70px]">
+          <p className="text-[9px] text-[#9CA3AF] font-semibold uppercase tracking-wide">Stressed</p>
+          <p className={isWorse ? "text-[#EF4444]" : "text-[#10B981]"}>
+            {stressed != null ? `${formatFinancial(stressed, isCurrency)}${unit || ""}` : "N/A"}
+          </p>
+        </div>
+        <div className="text-right min-w-[70px]">
+          <p className="text-[9px] text-[#9CA3AF] font-semibold uppercase tracking-wide">Δ Change</p>
+          <p className={change != null ? (isWorse ? "text-[#EF4444]" : "text-[#10B981]") : "text-[#9CA3AF]"}>
+            {change != null
+              ? `${change > 0 ? "+" : ""}${formatFinancial(change, isCurrency)}${unit || ""}`
+              : "N/A"}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function StressTestPage() {
   const { selectedCompanyId, selectedCompany } = useCompanyStore();
@@ -88,234 +192,300 @@ export default function StressTestPage() {
     }
   }
 
-  // Chart: only include bars where both values are available numbers.
-  // null → omit from chart rather than display as "0".
   const chartData = [
     {
-      metric: "Leverage (x)",
+      metric: "Leverage (×)",
       Baseline: result?.details?.baseline?.leverage ?? null,
       Stressed: result?.details?.stressed?.leverage ?? null,
-      baselineAvailable: result?.details?.baseline?.leverage != null,
-      stressedAvailable: result?.details?.stressed?.leverage != null,
     },
     {
-      metric: "Coverage (x)",
+      metric: "Coverage (×)",
       Baseline: result?.details?.baseline?.coverage ?? null,
       Stressed: result?.details?.stressed?.coverage ?? null,
-      baselineAvailable: result?.details?.baseline?.coverage != null,
-      stressedAvailable: result?.details?.stressed?.coverage != null,
     },
   ];
 
-  const calcStatus = result?.calculation_status ?? "valid";
-  const isInsufficient = calcStatus === "insufficient_data";
+  const hasChartData = chartData.some((d) => d.Baseline !== null || d.Stressed !== null);
 
   return (
-    <div className="space-y-8">
-      {/* Top Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Portfolio & Borrower Stress Testing</h1>
-          <p className="text-muted-foreground mt-1">Simulate macroeconomic shocks, rate hikes, and EBITDA contraction</p>
-        </div>
-
-        {selectedCompany && (
-          <span className="text-sm font-semibold text-foreground bg-card border border-border px-4 py-2 rounded-lg">
-            Entity: <span className="text-primary">{selectedCompany.company_name}</span> ({selectedCompany.sector})
-          </span>
-        )}
+    <div className="space-y-8 pb-12">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl md:text-3xl font-bold text-[#111827] tracking-tight">
+          Stress Testing
+        </h1>
+        <p className="text-xs md:text-sm font-medium text-[#6B7280] mt-1">
+          See how{" "}
+          <strong className="text-[#111827]">
+            {selectedCompany?.company_name || "the selected borrower"}
+          </strong>{" "}
+          could perform under adverse financial conditions.
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Sliders Control Panel */}
-        <div className="bg-card border border-border p-6 rounded-2xl shadow-sm space-y-6">
-          <div className="flex items-center gap-2 font-bold text-base border-b border-border pb-3">
-            <Sliders className="w-4 h-4 text-primary" /> Scenario Sliders
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex justify-between text-xs font-semibold">
-              <span>Revenue Change</span>
-              <span className={revenueChange < 0 ? "text-red-400" : "text-emerald-400"}>{revenueChange}%</span>
+      {!selectedBorrowerId ? (
+        <ImprovedEmptyState
+          icon={Sliders}
+          title="No borrower selected"
+          description="Select a borrower from the dropdown above to run a stress simulation and see scenario projections."
+        />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Sliders Panel (4 Cols) */}
+          <div className="lg:col-span-4 bg-white rounded-2xl p-6 border border-[#EEF1F5] shadow-[0_4px_20px_rgba(17,24,39,0.04)] space-y-6">
+            <div className="flex items-center gap-2 font-bold text-sm text-[#111827] pb-3 border-b border-[#EEF1F5]">
+              <Sliders className="w-4 h-4 text-[#7C8DFB]" />
+              <span>Scenario Controls</span>
             </div>
-            <input
-              type="range" min="-50" max="20" value={revenueChange}
-              onChange={(e) => setRevenueChange(Number(e.target.value))}
-              className="w-full accent-primary cursor-pointer"
+
+            <p className="text-[11px] text-[#6B7280] leading-relaxed -mt-2">
+              Drag each slider to model an adverse scenario. Negative values mean contraction; positive means expansion.
+            </p>
+
+            <ScenarioSlider
+              label="Revenue Change"
+              tooltip="Simulates revenue growth or contraction. A -20% shock models a significant revenue decline, as might occur in an economic downturn."
+              value={revenueChange}
+              min={-50}
+              max={20}
+              onChange={setRevenueChange}
+              formatValue={(v) => `${v}%`}
+              valueColor={revenueChange < 0 ? "#EF4444" : "#10B981"}
             />
-          </div>
 
-          <div className="space-y-2">
-            <div className="flex justify-between text-xs font-semibold">
-              <span>EBITDA Change</span>
-              <span className={ebitdaChange < 0 ? "text-red-400" : "text-emerald-400"}>{ebitdaChange}%</span>
-            </div>
-            <input
-              type="range" min="-50" max="20" value={ebitdaChange}
-              onChange={(e) => setEbitdaChange(Number(e.target.value))}
-              className="w-full accent-primary cursor-pointer"
+            <ScenarioSlider
+              label="EBITDA Change"
+              tooltip="EBITDA (Earnings Before Interest, Tax, Depreciation & Amortisation) measures operating profitability. A negative shock models rising costs or margin compression."
+              value={ebitdaChange}
+              min={-50}
+              max={20}
+              onChange={setEbitdaChange}
+              formatValue={(v) => `${v}%`}
+              valueColor={ebitdaChange < 0 ? "#EF4444" : "#10B981"}
             />
-          </div>
 
-          <div className="space-y-2">
-            <div className="flex justify-between text-xs font-semibold">
-              <span>Interest Rate Delta</span>
-              <span className="text-amber-400">+{rateChangeBps} bps</span>
-            </div>
-            <input
-              type="range" min="0" max="600" step="50" value={rateChangeBps}
-              onChange={(e) => setRateChangeBps(Number(e.target.value))}
-              className="w-full accent-primary cursor-pointer"
+            <ScenarioSlider
+              label="Interest Rate Shock"
+              tooltip="Models a central bank rate increase, raising the borrower's interest expense. Measured in basis points (100 bps = 1%). A +200 bps shock is a significant rate hike scenario."
+              value={rateChangeBps}
+              min={0}
+              max={600}
+              step={50}
+              onChange={setRateChangeBps}
+              formatValue={(v) => `+${v} bps`}
+              valueColor="#F97316"
             />
-          </div>
 
-          <div className="space-y-2">
-            <div className="flex justify-between text-xs font-semibold">
-              <span>Debt Load Expansion</span>
-              <span className="text-blue-400">+{debtChange}%</span>
-            </div>
-            <input
-              type="range" min="0" max="50" value={debtChange}
-              onChange={(e) => setDebtChange(Number(e.target.value))}
-              className="w-full accent-primary cursor-pointer"
+            <ScenarioSlider
+              label="Additional Debt Load"
+              tooltip="Models the borrower taking on additional debt. This increases leverage ratios and reduces headroom to covenant thresholds."
+              value={debtChange}
+              min={0}
+              max={50}
+              onChange={setDebtChange}
+              formatValue={(v) => `+${v}%`}
+              valueColor="#4F46E5"
             />
+
+            <button
+              onClick={runSimulation}
+              disabled={loading || !selectedBorrowerId}
+              className="w-full py-3 bg-[#7C8DFB] hover:bg-[#6366F1] text-white font-semibold rounded-xl text-xs shadow-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {loading ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <Play className="w-4 h-4" />
+              )}
+              <span>Run Simulation</span>
+            </button>
           </div>
 
-          <button
-            onClick={runSimulation}
-            disabled={loading || !selectedBorrowerId}
-            className="w-full py-3 bg-primary text-primary-foreground font-semibold rounded-xl text-sm hover:bg-primary/90 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            Run Scenario Simulation
-          </button>
-        </div>
-
-        {/* Results Overview */}
-        <div className="lg:col-span-2 space-y-6">
-
-          {/* Calculation Status Badge */}
-          {result && (
-            <div className={`px-4 py-3 rounded-xl border text-xs font-semibold flex items-center gap-2 ${STATUS_COLORS[calcStatus]}`}>
-              <Info className="w-4 h-4 shrink-0" />
-              <span>Calculation Status: {STATUS_LABELS[calcStatus]}</span>
-            </div>
-          )}
-
-          {/* Caveats Panel */}
-          {result && result.caveats && result.caveats.length > 0 && (
-            <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 space-y-1.5">
-              <p className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5" /> Data Quality Notices
-              </p>
-              {result.caveats.map((c, i) => (
-                <p key={i} className="text-xs text-amber-300/80 leading-relaxed pl-5">• {c}</p>
-              ))}
-            </div>
-          )}
-
-          {/* Top Result Banner */}
-          {isInsufficient ? (
-            <div className="p-6 rounded-2xl border bg-muted/20 border-border shadow-sm flex items-center gap-4">
-              <AlertTriangle className="w-8 h-8 text-amber-400 shrink-0" />
-              <div>
-                <h3 className="font-extrabold text-lg text-foreground">Insufficient Data</h3>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {result?.caveats?.[0] ?? "Upload and process financial documents to run stress scenarios."}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className={`p-6 rounded-2xl border ${
-              result?.at_risk
-                ? "bg-red-400/10 border-red-400/30 text-red-400"
-                : "bg-emerald-400/10 border-emerald-400/30 text-emerald-400"
-            } shadow-sm flex items-center justify-between`}>
-              <div className="flex items-center gap-3">
-                {result?.at_risk ? <AlertTriangle className="w-8 h-8" /> : <ShieldCheck className="w-8 h-8" />}
-                <div>
-                  <h3 className="font-extrabold text-lg">
-                    {result?.at_risk ? "FACILITY AT RISK UNDER STRESS" : (result ? "FACILITY REMAINS RESILIENT" : "—")}
-                  </h3>
-                  <p className="text-xs opacity-90">
-                    Projected covenant breaches: <strong>{result?.covenant_breaches_count ?? 0}</strong>
-                  </p>
-                </div>
-              </div>
-              <div className="text-right">
-                <span className="text-xs uppercase font-semibold text-foreground">Stressed Default Prob</span>
-                {/* RULE: null = Insufficient Data, not 0% */}
-                <p className="text-3xl font-extrabold text-foreground">
-                  {result?.projected_default_prob != null ? `${result.projected_default_prob}%` : "N/A"}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Comparison Bar Chart */}
-          <div className="bg-card border border-border p-6 rounded-2xl shadow-sm">
-            <h4 className="font-bold text-sm mb-1 flex items-center gap-2">
-              <BarChart2 className="w-4 h-4 text-primary" /> Baseline vs. Stressed Financial Ratios
-            </h4>
-            {(!result || isInsufficient) ? (
-              <div className="h-64 flex items-center justify-center text-muted-foreground text-sm">
-                Run a scenario to compare ratios.
-              </div>
-            ) : (
+          {/* Results (8 Cols) */}
+          <div className="lg:col-span-8 space-y-6">
+            {/* Result Banner */}
+            {result ? (
               <>
-                <p className="text-xs text-muted-foreground mb-4">
-                  N/A bars indicate the ratio could not be calculated for this scenario.
-                </p>
-                <div className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData}>
-                      <XAxis dataKey="metric" stroke="#6b7280" fontSize={12} tickLine={false} />
-                      <YAxis stroke="#6b7280" fontSize={12} tickLine={false} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: "#111827", borderColor: "#374151", borderRadius: "8px", color: "#fff" }}
-                        formatter={(value) => {
-                          if (value == null) return "N/A";
-                          return `${Number(value).toFixed(2)}x`;
-                        }}
-                      />
-                      <Legend />
-                      <Bar dataKey="Baseline" fill="#3b82f6" radius={[4, 4, 0, 0]}>
-                        {chartData.map((entry, index) => (
-                          <Cell key={`baseline-${index}`} fill={entry.baselineAvailable ? "#3b82f6" : "#374151"} />
-                        ))}
-                      </Bar>
-                      <Bar dataKey="Stressed" fill="#ef4444" radius={[4, 4, 0, 0]}>
-                        {chartData.map((entry, index) => (
-                          <Cell key={`stressed-${index}`} fill={entry.stressedAvailable ? "#ef4444" : "#374151"} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                {result.at_risk === true ? (
+                  <div className="p-6 rounded-2xl border shadow-sm flex items-center justify-between bg-[#FEE2E2]/40 border-[#FCA5A5] text-[#EF4444]">
+                    <div className="flex items-center gap-3">
+                      <AlertTriangle className="w-8 h-8 shrink-0 text-[#EF4444]" />
+                      <div>
+                        <h3 className="font-bold text-lg text-[#111827]">
+                          Facility At Risk Under This Scenario
+                        </h3>
+                        <p className="text-xs text-[#6B7280] mt-0.5">
+                          {result.covenant_breaches_count} projected covenant breach
+                          {result.covenant_breaches_count !== 1 ? "es" : ""} under this scenario.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                        Stressed Default Prob
+                      </span>
+                      <p className="text-3xl font-bold text-[#111827]">
+                        {result.projected_default_prob != null
+                          ? `${result.projected_default_prob.toFixed(1)}%`
+                          : "N/A"}
+                      </p>
+                    </div>
+                  </div>
+                ) : result.at_risk === false ? (
+                  <div className="p-6 rounded-2xl border shadow-sm flex items-center justify-between bg-[#D1FAE5]/40 border-[#6EE7B7] text-[#10B981]">
+                    <div className="flex items-center gap-3">
+                      <ShieldCheck className="w-8 h-8 shrink-0 text-[#10B981]" />
+                      <div>
+                        <h3 className="font-bold text-lg text-[#111827]">
+                          Facility Remains Resilient
+                        </h3>
+                        <p className="text-xs text-[#6B7280] mt-0.5">
+                          All monitored covenants evaluated and projected compliant under this scenario.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                        Stressed Default Prob
+                      </span>
+                      <p className="text-3xl font-bold text-[#111827]">
+                        {result.projected_default_prob != null
+                          ? `${result.projected_default_prob.toFixed(1)}%`
+                          : "N/A"}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-6 rounded-2xl border shadow-sm flex items-center justify-between bg-[#FEF3C7]/40 border-[#FCD34D] text-[#D97706]">
+                    <div className="flex items-center gap-3">
+                      <AlertTriangle className="w-8 h-8 shrink-0 text-[#D97706]" />
+                      <div>
+                        <h3 className="font-bold text-lg text-[#111827]">
+                          Unable to Determine Covenant Impact
+                        </h3>
+                        <p className="text-xs text-[#6B7280] mt-0.5">
+                          Required financial ratios (EBITDA / coverage) are unavailable to evaluate covenant thresholds.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#6B7280]">
+                        Stressed Default Prob
+                      </span>
+                      <p className="text-3xl font-bold text-[#111827]">
+                        {result.projected_default_prob != null
+                          ? `${result.projected_default_prob.toFixed(1)}%`
+                          : "N/A"}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Baseline vs Stressed Comparison */}
+                <div className="bg-white rounded-2xl p-6 border border-[#EEF1F5] shadow-[0_4px_20px_rgba(17,24,39,0.04)]">
+                  <h3 className="text-sm font-bold text-[#111827] mb-1">
+                    Baseline vs. Stressed — Financial Position & Ratios
+                  </h3>
+                  <p className="text-xs text-[#6B7280] mb-5">
+                    How key metrics and debt burden shift under the simulated scenario.
+                  </p>
+
+                  <ComparisonRow
+                    label="Revenue (Total Net Sales)"
+                    baseline={result.details?.baseline?.revenue}
+                    stressed={result.details?.stressed?.revenue}
+                    tooltip="Top-line operational revenue under the simulated contraction or expansion."
+                    lowerIsBetter={false}
+                    isCurrency={true}
+                  />
+
+                  <ComparisonRow
+                    label="Total Debt Burden"
+                    baseline={result.details?.baseline?.debt}
+                    stressed={result.details?.stressed?.debt}
+                    tooltip="Total debt outstanding including additional simulated debt load."
+                    lowerIsBetter={true}
+                    isCurrency={true}
+                  />
+
+                  <ComparisonRow
+                    label="Leverage Ratio (Total Debt / EBITDA)"
+                    baseline={result.details?.baseline?.leverage ?? null}
+                    stressed={result.details?.stressed?.leverage ?? null}
+                    unit="×"
+                    tooltip="Measures total debt relative to earnings. Higher leverage = greater financial risk. Most covenants cap leverage at 3–5×."
+                    lowerIsBetter={true}
+                  />
+
+                  <ComparisonRow
+                    label="Interest Coverage (EBITDA / Interest)"
+                    baseline={result.details?.baseline?.coverage ?? null}
+                    stressed={result.details?.stressed?.coverage ?? null}
+                    unit="×"
+                    tooltip="Measures ability to service debt with operating earnings. Below 1.5× is typically distressed. Many covenants require a minimum of 2–3×."
+                    lowerIsBetter={false}
+                  />
                 </div>
+
+                {/* Chart */}
+                <div className="bg-white rounded-2xl p-6 border border-[#EEF1F5] shadow-[0_4px_20px_rgba(17,24,39,0.04)]">
+                  <h3 className="text-sm font-bold text-[#111827] mb-4">
+                    Ratio Comparison Chart
+                  </h3>
+                  {hasChartData ? (
+                    <div className="h-52 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={chartData}>
+                          <XAxis dataKey="metric" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "#9CA3AF" }} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "#9CA3AF" }} />
+                          <Tooltip contentStyle={{ backgroundColor: "#111827", borderRadius: "8px", border: "none", color: "#FFF", fontSize: "12px" }} />
+                          <Legend />
+                          <Bar dataKey="Baseline" fill="#7C8DFB" radius={[6, 6, 0, 0]} />
+                          <Bar dataKey="Stressed" fill="#EF4444" radius={[6, 6, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <div className="py-6 flex flex-col items-center justify-center text-center bg-[#F8F9FC] rounded-xl border border-dashed border-[#EEF1F5]">
+                      <Sliders className="w-6 h-6 text-[#9CA3AF] mb-2" />
+                      <p className="text-xs font-semibold text-[#6B7280]">Ratios Unavailable for Charting</p>
+                      <p className="text-[11px] text-[#9CA3AF] max-w-sm mt-1">
+                        Leverage and Interest Coverage cannot be projected because baseline EBITDA is unavailable for this borrower.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Caveats */}
+                {result.caveats && result.caveats.length > 0 && (
+                  <div className="p-4 bg-[#F8F9FC] border border-[#EEF1F5] rounded-2xl space-y-1.5">
+                    <p className="text-[11px] font-bold text-[#6B7280] uppercase tracking-wide">
+                      Data Caveats & Methodology Notes
+                    </p>
+                    {result.caveats.map((c, i) => (
+                      <p key={i} className="text-[11px] text-[#9CA3AF] leading-relaxed flex items-start gap-1.5">
+                        <span className="mt-0.5 shrink-0 text-[#D97706]">⚠</span>
+                        {c}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </>
+            ) : (
+              <ImprovedEmptyState
+                icon={Sliders}
+                title="No scenario run yet"
+                description="Adjust scenario controls and click Run Simulation to evaluate how the borrower's financial position could change under stress."
+                actionLabel="Run Simulation"
+                onAction={runSimulation}
+              />
             )}
           </div>
-
-          {/* Ratio Summary Panel */}
-          {result && !isInsufficient && (
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                { label: "Baseline Leverage", val: fmtRatio(result.details?.baseline?.leverage) },
-                { label: "Stressed Leverage", val: fmtRatio(result.details?.stressed?.leverage) },
-                { label: "Baseline Coverage", val: fmtRatio(result.details?.baseline?.coverage) },
-                { label: "Stressed Coverage", val: fmtRatio(result.details?.stressed?.coverage) },
-              ].map(({ label, val }) => (
-                <div key={label} className="bg-card border border-border rounded-xl p-4">
-                  <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">{label}</p>
-                  <p className={`text-2xl font-extrabold mt-1 ${val === "N/A" ? "text-muted-foreground" : "text-foreground"}`}>
-                    {val}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }

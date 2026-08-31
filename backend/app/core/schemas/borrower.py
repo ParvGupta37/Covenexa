@@ -1,7 +1,8 @@
 """
 Borrower API schemas.
 """
-from pydantic import BaseModel, Field
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict, Field
 from app.domain.value_objects.risk_rating import RiskLevel
 
 
@@ -19,12 +20,14 @@ class BorrowerCreateSchema(BaseModel):
 
 
 class BorrowerResponseSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     organization_id: str
     company_name: str
     sector: str
     country: str
     risk_rating: RiskRatingSchema
-
-    class Config:
-        from_attributes = True
+    is_archived: bool = False
+    archived_at: datetime | None = None
+    archived_by: str | None = None

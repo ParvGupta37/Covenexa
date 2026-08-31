@@ -1,7 +1,19 @@
+import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard, Users, FileStack, ShieldAlert, LogOut, Sparkles,
-  Activity, BrainCircuit, Sliders, Network, History
+  LayoutDashboard,
+  Users,
+  ShieldAlert,
+  Activity,
+  FileStack,
+  BrainCircuit,
+  FileText,
+  ArrowLeftToLine,
+  ArrowRightToLine,
+  LogOut,
+  Sliders,
+  Network,
+  Settings2,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth.store";
 
@@ -9,17 +21,18 @@ export function Sidebar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { logout, user } = useAuthStore();
+  const [collapsed, setCollapsed] = useState(false);
 
   const navItems = [
-    { label: "Dashboard", path: "/", icon: LayoutDashboard },
-    { label: "Risk Analytics", path: "/risk", icon: Activity },
-    { label: "AI Copilot", path: "/copilot", icon: BrainCircuit },
-    { label: "Stress Testing", path: "/stress", icon: Sliders },
-    { label: "Knowledge Graph", path: "/graph", icon: Network },
-    { label: "Audit & Logs", path: "/audit", icon: History },
-    { label: "Borrowers", path: "/borrowers", icon: Users },
-    { label: "Loans & Facilities", path: "/loans", icon: ShieldAlert },
-    { label: "Ingestion & SEC", path: "/uploads", icon: FileStack },
+    { label: "Overview", path: "/app", icon: LayoutDashboard, exact: true },
+    { label: "Borrowers", path: "/app/borrowers", icon: Users },
+    { label: "Loans", path: "/app/loans", icon: ShieldAlert },
+    { label: "Risk Monitor", path: "/app/risk", icon: Activity },
+    { label: "Stress Testing", path: "/app/stress", icon: Sliders },
+    { label: "Knowledge Graph", path: "/app/graph", icon: Network },
+    { label: "Documents", path: "/app/uploads", icon: FileStack },
+    { label: "AI Copilot", path: "/app/copilot", icon: BrainCircuit },
+    { label: "Reports & Audit", path: "/app/audit", icon: FileText },
   ];
 
   const handleLogout = () => {
@@ -27,58 +40,111 @@ export function Sidebar() {
     navigate("/login");
   };
 
+  const isActive = (item: { path: string; exact?: boolean }) =>
+    item.exact ? pathname === item.path : pathname.startsWith(item.path);
+
   return (
-    <aside className="w-64 bg-card border-r border-border min-h-screen flex flex-col justify-between py-6 px-4 shrink-0">
+    <aside
+      className={`${
+        collapsed ? "w-20" : "w-64"
+      } bg-white border-r border-[#EEF1F5] h-screen flex flex-col justify-between py-6 px-4 shrink-0 transition-all duration-300 z-20`}
+    >
       <div className="space-y-6">
-        {/* Logo */}
+        {/* Logo & Brand Header */}
         <div className="flex items-center gap-3 px-2">
-          <Sparkles className="w-7 h-7 text-primary animate-pulse" />
-          <span className="text-xl font-bold bg-gradient-to-r from-primary to-purple-400 bg-clip-text text-transparent">
-            Covenexa
-          </span>
+          <div className="w-9 h-9 rounded-xl bg-[#111827] flex items-center justify-center text-white shrink-0 shadow-sm">
+            <svg
+              className="w-5 h-5 text-white fill-current"
+              viewBox="0 0 24 24"
+            >
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+            </svg>
+          </div>
+          {!collapsed && (
+            <span className="text-xl font-bold text-[#111827] tracking-tight">
+              Covenexa
+            </span>
+          )}
         </div>
 
-        {/* Navigation Items */}
+        {/* Navigation Section */}
         <nav className="space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const isActive = pathname === item.path;
+            const active = isActive(item);
+
             return (
               <Link
                 key={item.path}
                 to={item.path}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  isActive
-                    ? "bg-primary text-primary-foreground font-semibold"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                title={collapsed ? item.label : undefined}
+                className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                  active
+                    ? "bg-[#E8ECFF] text-[#111827] shadow-sm"
+                    : "text-[#6B7280] hover:bg-[#F8F9FC] hover:text-[#111827]"
                 }`}
               >
-                <Icon className="w-4 h-4" />
-                {item.label}
+                <Icon
+                  className={`w-4 h-4 shrink-0 ${
+                    active ? "text-[#4F46E5]" : "text-[#6B7280]"
+                  }`}
+                />
+                {!collapsed && <span>{item.label}</span>}
               </Link>
             );
           })}
         </nav>
       </div>
 
-      {/* User Profile */}
-      <div className="space-y-4 pt-4 border-t border-border">
-        {user && (
-          <div className="px-3 py-2">
-            <p className="text-sm font-semibold truncate">{user.name}</p>
-            <p className="text-xs text-muted-foreground truncate">{user.email}</p>
-            <span className="inline-block mt-1 text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-accent text-accent-foreground">
-              {user.role}
-            </span>
+      {/* Footer Section */}
+      <div className="space-y-3 pt-4 border-t border-[#EEF1F5]">
+        {/* Organization Settings — Admin only */}
+        {user?.role === "ADMIN" && (
+          <Link
+            to="/app/settings/organization"
+            title={collapsed ? "Organization Settings" : undefined}
+            className={`flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
+              pathname.startsWith("/app/settings")
+                ? "bg-[#E8ECFF] text-[#111827]"
+                : "text-[#6B7280] hover:bg-[#F8F9FC] hover:text-[#111827]"
+            }`}
+          >
+            <Settings2 className="w-4 h-4 shrink-0 text-[#6B7280]" />
+            {!collapsed && <span>Settings</span>}
+          </Link>
+        )}
+
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className="w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold text-[#6B7280] hover:bg-[#F8F9FC] transition-colors"
+        >
+          {collapsed ? (
+            <ArrowRightToLine className="w-4 h-4 shrink-0" />
+          ) : (
+            <>
+              <ArrowLeftToLine className="w-4 h-4 shrink-0" />
+              <span>Collapse</span>
+            </>
+          )}
+        </button>
+
+        {user && !collapsed && (
+          <div className="px-3.5 py-2 bg-[#F8F9FC] rounded-xl flex items-center justify-between">
+            <div className="min-w-0 flex-1 pr-2">
+              <p className="text-xs font-bold text-[#111827] truncate">
+                {user.name}
+              </p>
+              <p className="text-[11px] text-[#6B7280] truncate">{user.role}</p>
+            </div>
+            <button
+              onClick={handleLogout}
+              title="Sign Out"
+              className="text-[#6B7280] hover:text-[#EF4444] p-1 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         )}
-        <button
-          onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors"
-        >
-          <LogOut className="w-4 h-4" />
-          Sign Out
-        </button>
       </div>
     </aside>
   );

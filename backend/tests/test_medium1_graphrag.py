@@ -177,7 +177,8 @@ async def test_copilot_using_hybrid_retriever():
     result = await agent.run(state)
 
     assert "response" in result
-    assert "[PostgreSQL]" in result["response"]
+    assert "[PostgreSQL]" not in result["response"]
+    assert any("[SOURCE: PostgreSQL Structured Data]" in c for c in result["citations"])
     assert result["evidence_sources"]["sql_count"] >= 4
     assert result["evidence_sources"]["graph_count"] == 1
     assert result["evidence_sources"]["vector_count"] == 1

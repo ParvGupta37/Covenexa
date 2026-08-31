@@ -30,7 +30,7 @@ async def generate_credit_memo(
 
     # 1. Fetch Borrower
     res_b = await session.execute(
-        text("SELECT id, company_name, sector, country FROM borrowers WHERE id = :id"),
+        text("SELECT id, company_name, sector, country, updated_at FROM borrowers WHERE id = :id"),
         {"id": borrower_id},
     )
     b_row = res_b.mappings().first()
@@ -48,15 +48,17 @@ async def generate_credit_memo(
     health_dict = dict(h_row) if h_row else {"score": None, "category": "UNANALYZED"}
 
     res_d = await session.execute(
-        text("SELECT default_probability, risk_category, risk_factors FROM risk_assessments WHERE borrower_id = :id ORDER BY assessed_at DESC LIMIT 1"),
+        text("SELECT default_probability, risk_category, z_score, risk_factors FROM risk_assessments WHERE borrower_id = :id ORDER BY assessed_at DESC LIMIT 1"),
         {"id": borrower_id},
     )
     d_row = res_d.mappings().first()
-    default_dict = dict(d_row) if d_row else {"default_probability": None, "risk_category": "UNANALYZED", "risk_factors": ["No risk assessment performed yet for this entity."]}
+    default_dict = dict(d_row) if d_row else {"default_probability": None, "risk_category": "UNANALYZED", "z_score": None, "risk_factors": ["No risk assessment performed yet for this entity."]}
     if isinstance(default_dict.get("risk_factors"), str):
         import json
-        try: default_dict["risk_factors"] = json.loads(default_dict["risk_factors"])
-        except: default_dict["risk_factors"] = []
+        try:
+            default_dict["risk_factors"] = json.loads(default_dict["risk_factors"])
+        except:
+            default_dict["risk_factors"] = []
 
     # 3. Fetch Financial Metrics
     res_f = await session.execute(
@@ -80,7 +82,23 @@ async def generate_credit_memo(
     c_rows = res_c.mappings().all()
     covenants_list = [{k: (float(v) if isinstance(v, (int, float)) else v) for k, v in dict(r).items()} for r in c_rows]
 
-    # 5. Run Reporting Agent
+    # 5. Fetch Facilities / Loans
+    res_l = await session.execute(
+        text("SELECT id, loan_type, interest_rate, maturity_date FROM loans WHERE borrower_id = :id"),
+        {"id": borrower_id},
+    )
+    l_rows = res_l.mappings().all()
+    loans_list = [dict(r) for r in l_rows]
+
+    # 6. Fetch Latest Stress Simulation if available
+    res_s = await session.execute(
+        text("SELECT scenario_name, projected_health_score, projected_default_prob, covenant_breaches_count, at_risk FROM stress_test_simulations WHERE borrower_id = :id ORDER BY created_at DESC LIMIT 1"),
+        {"id": borrower_id},
+    )
+    s_row = res_s.mappings().first()
+    stress_dict = dict(s_row) if s_row else None
+
+    # 7. Run Reporting Agent
     agent = ReportingAgent()
     memo = agent.generate_credit_memo(
         borrower=borrower_dict,
@@ -88,9 +106,11 @@ async def generate_credit_memo(
         default_pred=default_dict,
         covenants=covenants_list,
         financials=fin_dict,
+        loans=loans_list,
+        stress=stress_dict,
     )
 
-    # 6. Log Audit event
+    # 8. Log Audit event
     await log_audit_event(
         action="credit_memo_generated",
         resource_type="report",

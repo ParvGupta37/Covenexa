@@ -1,9 +1,9 @@
 """
 Reporting Agent — Sprint 4.
 Generates comprehensive AI Executive Credit Memorandums and Risk Summaries
-by synthesizing borrower data, financial metrics, covenant monitoring status, and default predictions.
+by synthesizing borrower data, financial metrics, covenant monitoring status, default predictions, and facility details.
 """
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -25,6 +25,8 @@ class ReportingAgent:
         default_data = state.get("default_pred", {})
         covenants = state.get("covenants", [])
         financials = state.get("financials", {})
+        loans = state.get("loans", [])
+        stress = state.get("stress", None)
 
         memo = self.generate_credit_memo(
             borrower=borrower_data,
@@ -32,6 +34,8 @@ class ReportingAgent:
             default_pred=default_data,
             covenants=covenants,
             financials=financials,
+            loans=loans,
+            stress=stress,
         )
 
         state["credit_memo"] = memo
@@ -44,6 +48,8 @@ class ReportingAgent:
         default_pred: dict,
         covenants: list,
         financials: dict,
+        loans: Optional[list] = None,
+        stress: Optional[dict] = None,
     ) -> dict:
         company_name = borrower.get("company_name", "Borrower Entity")
         sector = borrower.get("sector", "General Industry")
@@ -53,6 +59,7 @@ class ReportingAgent:
         category = (health.get("category") or "UNANALYZED").upper()
         def_prob = default_pred.get("default_probability")  # float or None
         risk_category = (default_pred.get("risk_category") or "UNANALYZED").upper()
+        z_score = default_pred.get("z_score")
 
         breached_covenants = [c for c in covenants if c.get("status") in ["warning", "breach", "critical"]]
         compliant_covenants = [c for c in covenants if c.get("status") == "healthy"]
@@ -92,11 +99,13 @@ class ReportingAgent:
                 "sector": sector,
                 "country": country,
             },
+            "facilities": loans or [],
             "summary": {
                 "health_score": score,
                 "health_category": category,
                 "default_probability": def_prob,
                 "default_risk_category": risk_category,
+                "z_score": z_score,
                 "recommendation": recommendation,
                 "recommendation_reason": recommendation_reason,
             },
@@ -119,5 +128,11 @@ class ReportingAgent:
             },
             "risk_factors": default_pred.get("risk_factors") or [
                 "No specific risk factors uploaded yet.",
+            ],
+            "stress_observations": stress,
+            "evidence_sources": [
+                {"type": "Financial Data", "description": "Structured metrics extracted from audited financial statements in PostgreSQL database."},
+                {"type": "Extracted Document", "description": "Extracted clauses and covenant definitions from uploaded loan agreements."},
+                {"type": "Knowledge Graph", "description": "Entity relationships mapped in Neo4j credit topology."},
             ],
         }

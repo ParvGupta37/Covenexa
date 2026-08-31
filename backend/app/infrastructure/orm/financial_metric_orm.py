@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import uuid
 
 from sqlalchemy import DateTime, Float, ForeignKey, Numeric, String
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
 from decimal import Decimal
 
@@ -37,6 +38,9 @@ class FinancialMetricORM(Base):
     interest_coverage: Mapped[float] = mapped_column(Float, nullable=True)  # EBITDA / interest_expense
 
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    extraction_metadata: Mapped[dict | None] = mapped_column(
+        postgresql.JSONB(astext_type=String), nullable=True
+    )
     extracted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )

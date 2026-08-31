@@ -140,16 +140,55 @@ class TestStressTester:
 
     @pytest.mark.asyncio
     async def test_insufficient_data_missing_ebitda(self):
-        """Fin row with no EBITDA → calculation_status = insufficient_data."""
+        """Fin row with no EBITDA → calculation_status = partial_data, stressed debt & revenue calculated."""
         from ai.engines.stress_tester import StressTester
         fin = {
             "revenue": 100_000_000, "ebitda": None,
             "total_debt": 200_000_000, "cash": 10_000_000, "interest_expense": None,
         }
         session = self._make_session(fin_row=fin)
+        result = await StressTester().run_scenario(
+            session, "b1", "Test", revenue_change_pct=-15.0, debt_change_pct=10.0
+        )
+        assert result["calculation_status"] == "partial_data"
+        assert result["details"]["stressed"]["revenue"] == 85_000_000
+        assert result["details"]["stressed"]["debt"] == 220_000_000
+        assert result["details"]["stressed"]["ebitda"] is None
+        assert result["details"]["stressed"]["leverage"] is None
+
+    @pytest.mark.asyncio
+    async def test_unknown_covenants_prevent_false_resilience(self):
+        """When covenants require leverage/coverage but ratios are None, at_risk must be None, not False."""
+        from ai.engines.stress_tester import StressTester
+        fin = {
+            "revenue": 100_000_000, "ebitda": None,
+            "total_debt": 200_000_000, "cash": 10_000_000, "interest_expense": None,
+        }
+        covenants = [
+            {"id": "c1", "name": "Maximum Leverage Ratio", "threshold": 4.0, "threshold_direction": "max", "extracted_at": None, "agreement_id": None, "loan_id": None},
+            {"id": "c2", "name": "Minimum Interest Coverage", "threshold": 2.5, "threshold_direction": "min", "extracted_at": None, "agreement_id": None, "loan_id": None},
+        ]
+        session = self._make_session(fin_row=fin, covenants=covenants)
         result = await StressTester().run_scenario(session, "b1", "Test")
-        assert result["calculation_status"] == "insufficient_data"
-        assert result["projected_default_prob"] is None
+        assert result["at_risk"] is None
+        assert result["covenant_breaches_count"] == 0
+        assert result["details"]["covenants_summary"]["unknown"] == 2
+
+    @pytest.mark.asyncio
+    async def test_rate_shock_calculates_incremental_interest_on_debt(self):
+        """+200 bps rate shock on 200M debt creates 4M incremental interest."""
+        from ai.engines.stress_tester import StressTester
+        fin = {
+            "revenue": 100_000_000, "ebitda": 20_000_000,
+            "total_debt": 200_000_000, "cash": 10_000_000, "interest_expense": None,
+        }
+        session = self._make_session(fin_row=fin)
+        result = await StressTester().run_scenario(
+            session, "b1", "Rate Shock", interest_rate_change_bps=200.0, debt_change_pct=0.0
+        )
+        assert result["details"]["stressed"]["interest"] == 4_000_000.0
+        # 20M EBITDA / 4M interest = 5.0x coverage
+        assert result["details"]["stressed"]["coverage"] == 5.0
 
     @pytest.mark.asyncio
     async def test_near_zero_interest_coverage_capped_and_nonzero_default(self):
@@ -317,6 +356,133 @@ class TestHealthScoreEngine:
             f"No-data score should be ~50 (compliance only), got {result.score}"
         )
         assert result.breakdown["financial_score"] is None
+
+    @pytest.mark.asyncio
+    async def test_dynamic_renormalization_missing_financial_and_leverage(self):
+        """
+        Verify exact math when financial_score and leverage_score are None:
+        compliance: 100 (w=0.25), liquidity: 100 (w=0.20), trend: 80 (w=0.10)
+        Numerator: 100*0.25 + 100*0.20 + 80*0.10 = 25 + 20 + 8 = 53.0
+        Denominator: 0.25 + 0.20 + 0.10 = 0.55
+        Expected: 53.0 / 0.55 = 96.36 -> 96.4
+        """
+        from ai.engines.health_score_engine import HealthScoreEngine
+
+        class MockSession:
+            async def execute(self, stmt, params=None):
+                sql = str(stmt).upper()
+                class R:
+                    def mappings(self): return self
+                    def first(self):
+                        if "FINANCIAL_METRICS" in sql:
+                            return {
+                                "revenue": 100_000_000, "ebitda": None,
+                                "total_debt": 50_000_000, "cash": 25_000_000,
+                                "leverage_ratio": None, "interest_coverage": None,
+                            }
+                        if "BORROWER_HEALTH_SCORES" in sql:
+                            return {"score": 100.0}
+                        return None
+                    def all(self): return []
+                return R()
+            async def commit(self): pass
+
+        engine = HealthScoreEngine()
+        result = await engine.calculate_and_persist(MockSession(), "b_renorm")
+        
+        # Prelim base = (100*0.25 + 100*0.20)/(0.45) = 100.0
+        # Delta = 100.0 - 100.0 = 0 -> trend = 80.0
+        # Total = (25 + 20 + 8) / 0.55 = 53.0 / 0.55 = 96.36 -> 96.4
+        assert result.score == 96.4
+        assert result.breakdown["financial_score"] is None
+        assert result.breakdown["leverage_score"] is None
+        assert result.breakdown["compliance_score"] == 100.0
+        assert result.breakdown["liquidity_score"] == 100.0
+        assert result.breakdown["trend_score"] == 80.0
+
+    @pytest.mark.asyncio
+    async def test_dynamic_renormalization_actual_zero_score_is_not_omitted(self):
+        """
+        Actual measured 0.0 (e.g. 0% liquidity, breached covenants) must contribute 0.0 points
+        AND retain its weight in the denominator (must NOT be treated as None).
+        """
+        from ai.engines.health_score_engine import HealthScoreEngine
+
+        class MockSession:
+            async def execute(self, stmt, params=None):
+                sql = str(stmt).upper()
+                class R:
+                    def mappings(self): return self
+                    def first(self):
+                        if "FINANCIAL_METRICS" in sql:
+                            return {
+                                "revenue": 100_000_000, "ebitda": None,
+                                "total_debt": 50_000_000, "cash": 0.0,
+                                "leverage_ratio": None, "interest_coverage": None,
+                            }
+                        return None
+                    def all(self):
+                        # 4 breaches -> compliance = 100 - (4 * 30) = 0.0
+                        if "COVENANT_MONITORING" in sql:
+                            return [{"status": "breach", "cnt": 4}]
+                        return []
+                return R()
+            async def commit(self): pass
+
+        engine = HealthScoreEngine()
+        result = await engine.calculate_and_persist(MockSession(), "b_zero")
+        
+        # compliance = 0.0 (w=0.25), liquidity = 0.0 (w=0.20), others = None
+        # Numerator = 0.0*0.25 + 0.0*0.20 = 0.0
+        # Denominator = 0.25 + 0.20 = 0.45
+        # Total = 0.0 / 0.45 = 0.0
+        assert result.score == 0.0
+        assert result.breakdown["compliance_score"] == 0.0
+        assert result.breakdown["liquidity_score"] == 0.0
+        assert result.category == "critical"
+
+    @pytest.mark.asyncio
+    async def test_all_five_factors_available_calculates_exact_weighted_sum(self):
+        """
+        When all 5 metrics are available, total weight = 1.00 and score equals exact weighted sum.
+        """
+        from ai.engines.health_score_engine import HealthScoreEngine
+
+        class MockSession:
+            async def execute(self, stmt, params=None):
+                sql = str(stmt).upper()
+                class R:
+                    def mappings(self): return self
+                    def first(self):
+                        if "FINANCIAL_METRICS" in sql:
+                            return {
+                                "revenue": 100_000_000, "ebitda": 25_000_000,
+                                "total_debt": 50_000_000, "cash": 20_000_000,
+                                "leverage_ratio": 2.0, "interest_coverage": 5.0,
+                            }
+                        if "BORROWER_HEALTH_SCORES" in sql:
+                            return {"score": 90.0}
+                        return None
+                    def all(self): return []
+                return R()
+            async def commit(self): pass
+
+        engine = HealthScoreEngine()
+        result = await engine.calculate_and_persist(MockSession(), "b_all")
+
+        # margin = 0.25 -> fin_score = min(100, (0.25*200) + (5*10)) = 50 + 50 = 100.0
+        # compliance = 100.0
+        # liquidity = min(100, (20/50)*300) = 100.0
+        # leverage = 95.0 (leverage <= 2.0)
+        # prelim_base = (100*0.30 + 100*0.25 + 100*0.20 + 95*0.15) / 0.90 = (30 + 25 + 20 + 14.25)/0.90 = 89.25 / 0.90 = 99.1667
+        # delta = 99.1667 - 90.0 = 9.1667 -> trend = 80.0 + (9.1667*2) = 98.3333 -> 98.3
+        # Total = 100*0.30 + 100*0.25 + 100*0.20 + 95*0.15 + 98.3333*0.10 = 30 + 25 + 20 + 14.25 + 9.8333 = 99.0833 -> 99.1
+        assert result.score == 99.1
+        assert result.breakdown["financial_score"] == 100.0
+        assert result.breakdown["compliance_score"] == 100.0
+        assert result.breakdown["liquidity_score"] == 100.0
+        assert result.breakdown["leverage_score"] == 95.0
+        assert result.breakdown["trend_score"] == 98.3
 
 
 # ── DefaultPredictor unit tests ───────────────────────────────────────────────

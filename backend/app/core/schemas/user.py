@@ -2,19 +2,19 @@
 User API schemas.
 """
 from datetime import datetime
-from typing import Any
-from pydantic import BaseModel, EmailStr, field_validator
+from typing import Any, Optional
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
 
 class UserResponseSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     name: str
     email: EmailStr
     role: str
+    organization_id: Optional[str] = None
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
     @field_validator("email", mode="before")
     @classmethod

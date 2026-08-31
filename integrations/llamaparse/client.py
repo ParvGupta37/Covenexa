@@ -1,10 +1,11 @@
 """
-LlamaParse integration client — Sprint 2 implementation.
-Parses PDF/DOCX/XLSX/CSV documents with high fidelity.
-Falls back to pypdf for plain text extraction when LlamaParse is unavailable.
+LlamaParse integration client — Sprint 2 implementation with SEC HTML/Inline-XBRL support.
+Parses PDF/DOCX/XLSX/CSV/HTML documents with high fidelity.
+Falls back to pypdf for PDFs and BeautifulSoup for HTML/Inline-XBRL text extraction.
 """
 import logging
 import os
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,8 @@ logger = logging.getLogger(__name__)
 class LlamaParseClient:
     """
     LlamaParse API client for document parsing.
-    When LLAMAPARSE_API_KEY is not set, falls back to pypdf-based text extraction.
+    When LLAMAPARSE_API_KEY is not set, falls back to pypdf for PDFs
+    and structured BeautifulSoup parsing for HTML/Inline-XBRL documents.
     """
 
     def __init__(self, api_key: str) -> None:
@@ -21,7 +23,7 @@ class LlamaParseClient:
         self._client: Any = None
         self._use_fallback = not api_key or api_key == "not_set"
         if self._use_fallback:
-            logger.warning("LlamaParseClient: No API key — will use pypdf fallback.")
+            logger.warning("LlamaParseClient: No API key — will use local fallback parser.")
         else:
             logger.info("LlamaParseClient initialized.")
 
@@ -38,7 +40,7 @@ class LlamaParseClient:
             )
             logger.info("LlamaParseClient connected.")
         except ImportError:
-            logger.warning("llama-parse package not installed; using pypdf fallback.")
+            logger.warning("llama-parse package not installed; using local fallback.")
             self._use_fallback = True
 
     async def parse_document(
@@ -55,7 +57,7 @@ class LlamaParseClient:
                 "pages": list[dict],     # per-page content
                 "sections": list[str],   # detected section headers
                 "page_count": int,
-                "method": str,           # "llamaparse" | "pypdf" | "error"
+                "method": str,           # "llamaparse" | "pypdf" | "html_structured" | "error"
             }
         """
         ext = os.path.splitext(file_path)[-1].lower()
@@ -87,16 +89,18 @@ class LlamaParseClient:
                 "method": "llamaparse",
             }
         except Exception as exc:
-            logger.error("LlamaParse failed (%s), falling back to pypdf.", exc)
+            logger.error("LlamaParse failed (%s), falling back to local parser.", exc)
             return await self._parse_with_pypdf(file_path, os.path.splitext(file_path)[-1].lower())
 
     async def _parse_with_pypdf(self, file_path: str, ext: str) -> dict[str, Any]:
-        """Pure Python fallback using pypdf for PDFs, basic text read for others."""
+        """Local parser fallback using pypdf for PDFs and BeautifulSoup for HTML."""
         try:
             if ext == ".pdf":
                 return await _parse_pdf(file_path)
+            elif ext in (".htm", ".html", ".xhtml"):
+                return await _parse_html(file_path)
             elif ext in (".txt", ".md"):
-                with open(file_path, "r", errors="ignore") as f:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                     text = f.read()
                 return {
                     "text": text,
@@ -106,7 +110,6 @@ class LlamaParseClient:
                     "method": "text_read",
                 }
             else:
-                # DOCX / XLSX — basic string extraction
                 return await _parse_binary_fallback(file_path)
         except Exception as exc:
             logger.error("Fallback parsing also failed: %s", exc)
@@ -137,10 +140,59 @@ async def _parse_pdf(file_path: str) -> dict[str, Any]:
     }
 
 
+async def _parse_html(file_path: str) -> dict[str, Any]:
+    """
+    Extract clean, structured text and table structures from SEC HTML/Inline-XBRL filings.
+    Strips scripts/styles, preserves table rows/cells, and produces clean markdown-like text.
+    """
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        logger.warning("BeautifulSoup4 not available, using text fallback.")
+        return await _parse_binary_fallback(file_path)
+
+    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+        html_content = f.read()
+
+    soup = BeautifulSoup(html_content, "html.parser")
+
+    # Decompose script, style, noscript, head, and metadata tags
+    for tag in soup(["script", "style", "noscript", "meta", "link", "svg", "head", "iframe"]):
+        tag.decompose()
+
+    # Process tables into clean pipe-delimited structured text
+    for table in soup.find_all("table"):
+        table_rows = []
+        for tr in table.find_all("tr"):
+            cells = []
+            for cell in tr.find_all(["td", "th"]):
+                cell_text = cell.get_text(separator=" ").strip()
+                cell_text = re.sub(r"\s+", " ", cell_text.replace("\xa0", " "))
+                if cell_text:
+                    cells.append(cell_text)
+            if cells:
+                table_rows.append(" | ".join(cells))
+        if table_rows:
+            table.replace_with("\n\n" + "\n".join(table_rows) + "\n\n")
+
+    clean_text = soup.get_text(separator="\n")
+    clean_text = re.sub(r"[ \t]+", " ", clean_text)
+    clean_text = re.sub(r"\n{3,}", "\n\n", clean_text).strip()
+
+    sections = _extract_section_headers(clean_text)
+    return {
+        "text": clean_text,
+        "pages": [{"page": 1, "content": clean_text}],
+        "sections": sections,
+        "page_count": 1,
+        "method": "html_structured",
+    }
+
+
 async def _parse_binary_fallback(file_path: str) -> dict[str, Any]:
     """Try to read binary files as UTF-8 text."""
     try:
-        with open(file_path, "r", errors="ignore") as f:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             text = f.read()
     except Exception:
         text = ""

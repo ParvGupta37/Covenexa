@@ -32,7 +32,12 @@ async def run_cleanup(dry_run: bool = True) -> Dict[str, Any]:
         acme_row = res_b.mappings().first()
         if not acme_row:
             print("[INFO] Acme Tech Inc. borrower not found in DB.")
-            return {}
+            return {
+                "agreements_deleted": 0,
+                "fin_metrics_deleted": 0,
+                "scores_deleted": 0,
+                "risk_assessments_deleted": 0,
+            }
 
         acme_id = acme_row["id"]
         print(f"[FOUND] Acme Tech Inc. Borrower ID: {acme_id}")

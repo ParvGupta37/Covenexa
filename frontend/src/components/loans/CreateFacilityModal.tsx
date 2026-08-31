@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Plus, Loader2 } from "lucide-react";
+import { X, Plus, Loader2, AlertCircle } from "lucide-react";
 import api from "@/lib/api";
 import { useCompanyStore } from "@/store/company.store";
 
@@ -22,9 +22,9 @@ export function CreateFacilityModal({
   const fiveYearsStr = new Date(Date.now() + 5 * 365 * 86400 * 1000).toISOString().split("T")[0];
 
   const [borrowerId, setBorrowerId] = useState(defaultBorrowerId || selectedCompanyId || "");
-  const [amount, setAmount] = useState<number>(50000000);
+  const [amountStr, setAmountStr] = useState<string>("50,000,000");
   const [currency, setCurrency] = useState("USD");
-  const [interestRatePct, setInterestRatePct] = useState<number>(6.5);
+  const [interestRatePct, setInterestRatePct] = useState<string>("6.5");
   const [startDate, setStartDate] = useState(todayStr);
   const [maturityDate, setMaturityDate] = useState(fiveYearsStr);
   const [submitting, setSubmitting] = useState(false);
@@ -38,20 +38,42 @@ export function CreateFacilityModal({
 
   if (!isOpen) return null;
 
+  // Clean numeric parser that handles commas, decimals, leading zeroes, and raw numbers
+  function parseAmount(val: string): number {
+    const cleaned = val.replace(/,/g, "").trim();
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? 0 : num;
+  }
+
+  function handleAmountChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const val = e.target.value;
+    // Allow digits, commas, and a decimal point
+    if (/^[0-9,.]*$/.test(val)) {
+      setAmountStr(val);
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErrorMsg("");
+
+    const parsedAmount = parseAmount(amountStr);
+    const parsedRate = parseFloat(interestRatePct);
 
     if (!borrowerId) {
       setErrorMsg("Please select a target borrower entity.");
       return;
     }
-    if (amount <= 0) {
-      setErrorMsg("Principal amount must be greater than zero.");
+    if (parsedAmount <= 0) {
+      setErrorMsg("Facility principal amount must be greater than zero.");
       return;
     }
-    if (interestRatePct <= 0 || interestRatePct > 100) {
-      setErrorMsg("Interest rate percentage must be between 0 and 100.");
+    if (isNaN(parsedRate) || parsedRate <= 0 || parsedRate > 100) {
+      setErrorMsg("Interest rate percentage must be between 0.01% and 100%.");
+      return;
+    }
+    if (new Date(maturityDate) <= new Date(startDate)) {
+      setErrorMsg("Maturity date must be after origination date.");
       return;
     }
 
@@ -60,10 +82,10 @@ export function CreateFacilityModal({
       const res = await api.post("/api/v1/loans/", {
         borrower_id: borrowerId,
         principal_amount: {
-          amount: Number(amount),
+          amount: parsedAmount,
           currency: currency,
         },
-        interest_rate: Number(interestRatePct) / 100.0,
+        interest_rate: parsedRate / 100.0,
         start_date: startDate,
         maturity_date: maturityDate,
         status: "ACTIVE",
@@ -76,7 +98,14 @@ export function CreateFacilityModal({
       }
     } catch (err: any) {
       console.error("Failed to create facility", err);
-      setErrorMsg(err.response?.data?.detail || "Failed to create loan facility.");
+      const detail = err.response?.data?.detail;
+      setErrorMsg(
+        typeof detail === "string"
+          ? detail
+          : Array.isArray(detail)
+          ? detail.map((d: any) => d.msg).join(", ")
+          : "Failed to create loan facility."
+      );
     } finally {
       setSubmitting(false);
     }
@@ -122,25 +151,30 @@ export function CreateFacilityModal({
             <div className="col-span-2 space-y-1.5">
               <label className="font-semibold text-foreground text-xs">Facility Principal Amount *</label>
               <input
-                type="number"
-                min="1"
-                step="10000"
-                value={amount}
-                onChange={(e) => setAmount(Number(e.target.value))}
+                type="text"
+                value={amountStr}
+                onChange={handleAmountChange}
+                placeholder="e.g. 500,000,000"
                 required
-                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary font-medium"
               />
+              {parseAmount(amountStr) > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  Parsed: {currency} {parseAmount(amountStr).toLocaleString()}
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <label className="font-semibold text-foreground text-xs">Currency</label>
               <select
                 value={currency}
                 onChange={(e) => setCurrency(e.target.value)}
-                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary font-medium"
               >
                 <option value="USD">USD ($)</option>
                 <option value="EUR">EUR (€)</option>
                 <option value="GBP">GBP (£)</option>
+                <option value="INR">INR (₹)</option>
               </select>
             </div>
           </div>
@@ -150,14 +184,14 @@ export function CreateFacilityModal({
             <label className="font-semibold text-foreground text-xs">Interest Rate (%) *</label>
             <input
               type="number"
-              min="0.1"
-              max="50"
-              step="0.05"
+              step="any"
+              min="0.01"
+              max="100"
               value={interestRatePct}
-              onChange={(e) => setInterestRatePct(Number(e.target.value))}
+              onChange={(e) => setInterestRatePct(e.target.value)}
               required
               placeholder="e.g. 6.5"
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary font-medium"
             />
           </div>
 
@@ -186,8 +220,9 @@ export function CreateFacilityModal({
           </div>
 
           {errorMsg && (
-            <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg text-xs font-semibold">
-              {errorMsg}
+            <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg text-xs font-semibold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
             </div>
           )}
 

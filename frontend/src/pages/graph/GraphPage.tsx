@@ -3,6 +3,7 @@ import { Info, Loader2, Network } from "lucide-react";
 import api from "@/lib/api";
 import { useCompanyStore } from "@/store/company.store";
 
+
 interface NodeItem {
   id: string;
   label: string;
@@ -18,11 +19,20 @@ interface EdgeItem {
 }
 
 const TYPE_COLORS: Record<string, string> = {
-  borrower: "#10b981",
-  loan: "#3b82f6",
-  agreement: "#8b5cf6",
-  covenant: "#f59e0b",
-  financial: "#ec4899",
+  borrower: "#10B981",
+  loan: "#7C8DFB",
+  agreement: "#9333EA",
+  covenant: "#F59E0B",
+  financial: "#EF4444",
+};
+
+// Node type descriptions for the inspector
+const TYPE_DESCRIPTIONS: Record<string, string> = {
+  borrower: "The company or entity that has taken on credit obligations. The central entity in any credit relationship.",
+  loan: "A credit facility — the specific loan or revolving credit agreement between the lender and borrower.",
+  agreement: "The legal document governing loan terms, including covenants, repayment schedule, and financial maintenance requirements.",
+  covenant: "A financial condition the borrower must continuously satisfy under the credit agreement (e.g., maintain leverage below 4.5×).",
+  financial: "Extracted financial data from borrower statements — including ratios, revenue, EBITDA, and debt metrics.",
 };
 
 export default function GraphPage() {
@@ -59,46 +69,63 @@ export default function GraphPage() {
   }, [selectedBorrowerId]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8 pb-12">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Credit Knowledge Graph</h1>
-          <p className="text-muted-foreground mt-1">Live relationship graph connecting Borrowers, Facilities, Agreements, Covenants, and Financials</p>
-        </div>
-
-        {selectedCompany && (
-          <span className="text-sm font-semibold text-foreground bg-card border border-border px-4 py-2 rounded-lg">
-            Topology Entity: <span className="text-primary">{selectedCompany.company_name}</span>
-          </span>
-        )}
+      <div>
+        <h1 className="text-2xl md:text-3xl font-bold text-[#111827] tracking-tight">
+          Knowledge Graph
+        </h1>
+        <p className="text-xs md:text-sm font-medium text-[#6B7280] mt-1">
+          Connected credit relationships for{" "}
+          <strong className="text-[#111827]">
+            {selectedCompany?.company_name || "selected borrower"}
+          </strong>.
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* SVG Graph Canvas */}
-        <div className="lg:col-span-3 bg-card border border-border rounded-2xl p-4 shadow-sm relative h-[520px] overflow-hidden flex items-center justify-center">
-          <div className="absolute top-4 left-4 z-10 flex gap-3 text-xs flex-wrap">
+
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Graph Canvas (8 Cols) */}
+        <div className="lg:col-span-8 bg-white rounded-2xl border border-[#EEF1F5] shadow-[0_4px_20px_rgba(17,24,39,0.04)] p-4 relative h-[520px] overflow-hidden flex items-center justify-center">
+          {/* Node Type Legend */}
+          <div className="absolute top-4 left-4 z-10 flex gap-2 text-xs flex-wrap">
             {Object.entries(TYPE_COLORS).map(([type, color]) => (
-              <div key={type} className="flex items-center gap-1.5 bg-background/80 px-2.5 py-1 rounded-full border border-border shadow-sm">
-                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-                <span className="capitalize text-muted-foreground font-semibold">{type}</span>
+              <div
+                key={type}
+                className="flex items-center gap-1.5 bg-white px-3 py-1 rounded-full border border-[#EEF1F5] shadow-sm"
+                title={TYPE_DESCRIPTIONS[type]}
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  style={{ backgroundColor: color }}
+                />
+                <span className="capitalize font-semibold text-[#6B7280]">
+                  {type}
+                </span>
               </div>
             ))}
           </div>
 
           {loading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="w-5 h-5 animate-spin text-primary" /> Querying Graph Topology...
+            <div className="flex items-center gap-2 text-xs font-semibold text-[#6B7280]">
+              <Loader2 className="w-5 h-5 animate-spin text-[#7C8DFB]" />
+              <span>Loading Knowledge Graph…</span>
             </div>
           ) : nodes.length === 0 ? (
-            <div className="text-center text-muted-foreground text-sm space-y-1">
-              <Network className="w-10 h-10 opacity-30 mx-auto mb-2" />
-              <p className="font-semibold">No graph nodes for this company yet</p>
-              <p className="text-xs">Upload an agreement or SEC filing to generate entity connections.</p>
+            <div className="text-center text-[#9CA3AF] space-y-3 px-6 max-w-xs">
+              <Network className="w-10 h-10 opacity-30 mx-auto" />
+              <div>
+                <p className="text-sm font-bold text-[#111827]">
+                  No graph data yet
+                </p>
+                <p className="text-xs text-[#6B7280] leading-relaxed mt-1">
+                  Upload a credit agreement or SEC filing to generate entity relationships. The graph will populate automatically after document processing.
+                </p>
+              </div>
             </div>
           ) : (
             <svg className="w-full h-full">
-              {/* Draw Edges */}
               {edges.map((e, idx) => {
                 const source = nodes.find((n) => n.id === e.from);
                 const target = nodes.find((n) => n.id === e.to);
@@ -111,17 +138,16 @@ export default function GraphPage() {
                     y1={source.y}
                     x2={target.x}
                     y2={target.y}
-                    stroke="#374151"
+                    stroke="#E5E7EB"
                     strokeWidth="2"
                     strokeDasharray="4 4"
                   />
                 );
               })}
 
-              {/* Draw Nodes */}
               {nodes.map((node) => {
                 const isSelected = selectedNode?.id === node.id;
-                const color = TYPE_COLORS[node.type] || "#3b82f6";
+                const color = TYPE_COLORS[node.type] || "#7C8DFB";
 
                 return (
                   <g
@@ -136,12 +162,11 @@ export default function GraphPage() {
                       opacity={isSelected ? 1 : 0.85}
                       stroke="#ffffff"
                       strokeWidth={isSelected ? 3 : 1}
-                      className="hover:scale-110 transition-all"
                     />
                     <text
                       y={34}
                       textAnchor="middle"
-                      fill="#e5e7eb"
+                      fill="#111827"
                       fontSize="11"
                       fontWeight="600"
                     >
@@ -154,34 +179,59 @@ export default function GraphPage() {
           )}
         </div>
 
-        {/* Node Inspector Panel */}
-        <div className="bg-card border border-border p-6 rounded-2xl shadow-sm space-y-4">
-          <div className="flex items-center gap-2 font-bold border-b border-border pb-3 text-foreground">
-            <Info className="w-4 h-4 text-primary" /> Node Inspector
+        {/* Inspector Panel (4 Cols) */}
+        <div className="lg:col-span-4 bg-white rounded-2xl border border-[#EEF1F5] shadow-[0_4px_20px_rgba(17,24,39,0.04)] p-6 space-y-4">
+          <div className="flex items-center gap-2 font-bold text-sm text-[#111827] pb-3 border-b border-[#EEF1F5]">
+            <Info className="w-4 h-4 text-[#7C8DFB]" />
+            <span>Node Inspector</span>
           </div>
 
           {selectedNode ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Selected Entity Node</span>
-                <h3 className="text-lg font-bold text-foreground mt-0.5">{selectedNode.label}</h3>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[#9CA3AF]">
+                  Selected Entity
+                </span>
+                <h3 className="text-base font-bold text-[#111827] mt-0.5">
+                  {selectedNode.label}
+                </h3>
                 <span
-                  className="inline-block mt-1 px-2.5 py-0.5 text-xs font-bold rounded-full uppercase text-white"
-                  style={{ backgroundColor: TYPE_COLORS[selectedNode.type] || "#3b82f6" }}
+                  className="inline-block mt-1.5 px-2.5 py-0.5 text-xs font-bold rounded-full text-white capitalize"
+                  style={{
+                    backgroundColor: TYPE_COLORS[selectedNode.type] || "#7C8DFB",
+                  }}
                 >
                   {selectedNode.type}
                 </span>
               </div>
 
-              <div className="pt-3 border-t border-border space-y-2 text-xs">
-                <p className="font-semibold text-muted-foreground">Properties & Data:</p>
-                <div className="p-3 bg-muted/40 rounded-xl text-foreground font-mono leading-relaxed break-words">
+              {/* What this node type means */}
+              <div className="p-3 bg-[#E8ECFF] rounded-xl">
+                <p className="text-[11px] text-[#4F46E5] font-semibold mb-0.5">
+                  What is a {selectedNode.type}?
+                </p>
+                <p className="text-[11px] text-[#6B7280] leading-relaxed">
+                  {TYPE_DESCRIPTIONS[selectedNode.type] || "An entity in the credit knowledge graph."}
+                </p>
+              </div>
+
+              <div className="pt-1 space-y-2 text-xs">
+                <p className="font-semibold text-[#6B7280]">Entity Properties:</p>
+                <div className="p-3 bg-[#F8F9FC] border border-[#EEF1F5] rounded-xl text-[#111827] font-mono leading-relaxed break-words text-[11px]">
                   {selectedNode.details}
                 </div>
               </div>
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground">Click any graph node to inspect live entity metadata.</p>
+            <div className="text-center py-8">
+              <Network className="w-8 h-8 mx-auto text-[#9CA3AF] opacity-50 mb-2" />
+              <p className="text-xs font-semibold text-[#6B7280]">
+                Click any node to inspect it.
+              </p>
+              <p className="text-[11px] text-[#9CA3AF] mt-1 leading-relaxed">
+                Each node represents a credit entity. Select one to see its details and relationship context.
+              </p>
+            </div>
           )}
         </div>
       </div>

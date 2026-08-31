@@ -1,7 +1,7 @@
 """
 Loan API schemas.
 """
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field
 from app.domain.entities.loan import LoanStatus
@@ -33,3 +33,6 @@ class LoanResponseSchema(BaseModel):
     maturity_date: date
     status: LoanStatus
     agreement_id: str | None = None
+    is_archived: bool = False
+    archived_at: datetime | None = None
+    archived_by: str | None = None

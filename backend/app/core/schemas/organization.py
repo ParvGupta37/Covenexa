@@ -18,3 +18,20 @@ class OrganizationResponseSchema(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class OrganizationStatsSchema(BaseModel):
+    borrower_count: int
+    loan_count: int
+    agreement_count: int
+
+
+class OrganizationDetailSchema(BaseModel):
+    id: str
+    name: str
+    industry: str
+    created_at: datetime
+    stats: OrganizationStatsSchema
+
+    class Config:
+        from_attributes = True

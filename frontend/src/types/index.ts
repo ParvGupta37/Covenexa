@@ -5,6 +5,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  organization_id?: string;
   created_at: string;
 }
 
@@ -27,6 +28,9 @@ export interface Borrower {
   sector: string;
   country: string;
   risk_rating: RiskRating;
+  is_archived?: boolean;
+  archived_at?: string | null;
+  archived_by?: string | null;
 }
 
 export interface Money {
@@ -43,6 +47,9 @@ export interface Loan {
   start_date: string;
   maturity_date: string;
   status: "ACTIVE" | "CLOSED" | "DEFAULTED";
+  is_archived?: boolean;
+  archived_at?: string | null;
+  archived_by?: string | null;
 }
 
 export interface UploadedDocument {

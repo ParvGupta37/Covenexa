@@ -17,3 +17,22 @@ class CreateLoanCommand:
     maturity_date: date
     agreement_id: str | None = None
     status: LoanStatus = LoanStatus.ACTIVE
+
+
+@dataclass
+class ArchiveLoanCommand:
+    loan_id: str
+    organization_id: str
+    user_id: str
+
+
+@dataclass
+class RestoreLoanCommand:
+    loan_id: str
+    organization_id: str
+
+
+@dataclass
+class DeleteLoanCommand:
+    loan_id: str
+    organization_id: str | None = None

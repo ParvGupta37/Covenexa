@@ -3,6 +3,7 @@ PostgreSQL structured SQL retriever.
 Queries borrower profile, health score, covenant monitoring, risk assessment,
 and financial_metrics tables for structured context.
 """
+import json
 from typing import Any, List
 import structlog
 from ai.rag.retrievers.base_retriever import BaseRetriever
@@ -19,7 +20,9 @@ def _fmt_val(val: Any, unit: str = "", money: bool = False, ratio: bool = False)
     try:
         num = float(val)
         if money:
-            if abs(num) >= 1_000_000_000:
+            if abs(num) >= 1_000_000_000_000:
+                return f"${num / 1_000_000_000_000:.2f}T"
+            elif abs(num) >= 1_000_000_000:
                 return f"${num / 1_000_000_000:.2f}B"
             elif abs(num) >= 1_000_000:
                 return f"${num / 1_000_000:.2f}M"
@@ -29,6 +32,23 @@ def _fmt_val(val: Any, unit: str = "", money: bool = False, ratio: bool = False)
         return f"{num:.1f}{unit}"
     except (ValueError, TypeError):
         return str(val) if val else "N/A"
+
+
+def _clean_json_str(val: Any) -> str:
+    """Formats JSON strings into human-readable text."""
+    if not val:
+        return "N/A"
+    if isinstance(val, str) and (val.startswith("{") or val.startswith("[")):
+        try:
+            parsed = json.loads(val)
+            if isinstance(parsed, list):
+                return "; ".join(str(x) for x in parsed)
+            elif isinstance(parsed, dict):
+                parts = [f"{k.replace('_', ' ').title()}: {v}" for k, v in parsed.items() if v is not None]
+                return "; ".join(parts) if parts else "N/A"
+        except Exception:
+            pass
+    return str(val)
 
 
 class SqlRetriever(BaseRetriever):
@@ -82,6 +102,7 @@ class SqlRetriever(BaseRetriever):
             h = res_h.mappings().first()
             if h:
                 h_dict = dict(h)
+                explanation_clean = _clean_json_str(h_dict.get("explanation"))
                 results.append({
                     "source": "postgres_sql",
                     "type": "health_score",
@@ -90,25 +111,43 @@ class SqlRetriever(BaseRetriever):
                         f"| Financial Score: {_fmt_val(h_dict.get('financial_score'))} "
                         f"| Compliance Score: {_fmt_val(h_dict.get('compliance_score'))} "
                         f"| Leverage Score: {_fmt_val(h_dict.get('leverage_score'))} "
-                        f"| Explanation: {h_dict.get('explanation', 'N/A')}"
+                        f"| Breakdown: {explanation_clean}"
                     ),
                     "score": 0.92,
                     "metadata": h_dict,
                 })
 
-            # 3. Covenant Monitoring & Covenants
+            # 3. Covenant Monitoring & Covenants (Deduplicated)
             res_cov = await sess.execute(
                 text("""
-                    SELECT cm.status, cm.current_value, cm.threshold_value, cm.headroom_pct, cm.reason,
+                    SELECT DISTINCT ON (c.name) cm.status, cm.current_value, cm.threshold_value, cm.headroom_pct, cm.reason,
                            c.name as covenant_name, c.covenant_type, c.threshold_direction
                     FROM covenant_monitoring cm
                     JOIN covenants c ON c.id = cm.covenant_id
                     WHERE cm.borrower_id = :b
+                    ORDER BY c.name, cm.checked_at DESC
                     LIMIT :limit
                 """),
                 {"b": borrower_id, "limit": limit}
             )
             covs = res_cov.mappings().all()
+            if not covs:
+                # Direct covenant fallback if monitoring hasn't recorded yet
+                res_cov_direct = await sess.execute(
+                    text("""
+                        SELECT DISTINCT ON (c.name) 'UNKNOWN' as status, NULL as current_value, c.threshold as threshold_value, NULL as headroom_pct,
+                               c.description as reason, c.name as covenant_name, c.covenant_type, c.threshold_direction
+                        FROM covenants c
+                        JOIN agreements a ON a.id = c.agreement_id
+                        JOIN loans l ON l.id = a.loan_id
+                        WHERE l.borrower_id = :b
+                        ORDER BY c.name
+                        LIMIT :limit
+                    """),
+                    {"b": borrower_id, "limit": limit}
+                )
+                covs = res_cov_direct.mappings().all()
+
             for c in covs:
                 c_dict = dict(c)
                 results.append({
@@ -119,7 +158,7 @@ class SqlRetriever(BaseRetriever):
                         f"| Current: {_fmt_val(c_dict.get('current_value'), ratio=True)} "
                         f"| Threshold: {_fmt_val(c_dict.get('threshold_value'), ratio=True)} ({c_dict.get('threshold_direction', 'max')}) "
                         f"| Headroom: {_fmt_val(c_dict.get('headroom_pct'), unit='%')} "
-                        f"| Detail: {c_dict.get('reason')}"
+                        f"| Detail: {c_dict.get('reason') or 'Extracted agreement covenant parameter.'}"
                     ),
                     "score": 0.90,
                     "metadata": c_dict,
@@ -133,6 +172,7 @@ class SqlRetriever(BaseRetriever):
             r = res_risk.mappings().first()
             if r:
                 r_dict = dict(r)
+                risk_factors_clean = _clean_json_str(r_dict.get("risk_factors"))
                 results.append({
                     "source": "postgres_sql",
                     "type": "risk_assessment",
@@ -141,7 +181,7 @@ class SqlRetriever(BaseRetriever):
                         f"| Category: {_fmt_val(r_dict.get('risk_category')).upper()} "
                         f"| Model Confidence: {_fmt_val(r_dict.get('confidence_score'))} "
                         f"| Z-Score: {_fmt_val(r_dict.get('z_score'))} "
-                        f"| Risk Factors: {r_dict.get('risk_factors', 'N/A')}"
+                        f"| Risk Factors: {risk_factors_clean}"
                     ),
                     "score": 0.90,
                     "metadata": r_dict,

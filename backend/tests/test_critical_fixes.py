@@ -37,7 +37,9 @@ async def test_safe_format_helpers_with_none_values():
 @pytest.mark.asyncio
 async def test_copilot_agent_handles_missing_session_and_none_fields():
     """Verify CRITICAL-3 CopilotAgent does not crash when fields or context are None/missing."""
+    from unittest.mock import AsyncMock
     agent = CopilotAgent()
+    agent._llm.generate = AsyncMock(return_value="Leverage ratio is calculated from debt and EBITDA.")
     # Test with no session or borrower_id
     result = await agent.run({
         "user_query": "What is the leverage ratio?",

@@ -8,6 +8,9 @@ import { getAccessToken, clearTokens } from "@/lib/auth";
 import { AppShell } from "@/components/layout/AppShell";
 import { ProtectedRoute } from "@/components/shared/ProtectedRoute";
 
+// Public Pages
+import { LandingPage } from "@/pages/landing/LandingPage";
+
 // Auth Pages
 import { LoginPage } from "@/pages/auth/LoginPage";
 import { RegisterPage } from "@/pages/auth/RegisterPage";
@@ -23,6 +26,7 @@ import LoansPage from "@/pages/loans/LoansPage";
 import UploadsPage from "@/pages/uploads/UploadsPage";
 import DocumentDetailPage from "@/pages/documents/DocumentDetailPage";
 import AuditPage from "@/pages/audit/AuditPage";
+import OrganizationSettingsPage from "@/pages/settings/OrganizationSettingsPage";
 
 export default function App() {
   const setUser = useAuthStore((state) => state.setUser);
@@ -52,23 +56,27 @@ export default function App() {
 
   return (
     <Routes>
+      {/* Public Landing Page */}
+      <Route path="/" element={<LandingPage />} />
+
       {/* Auth Public Routes */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
 
-      {/* Private App Routes inside AppShell */}
+      {/* Private App Routes inside AppShell — all under /app/* */}
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/risk" element={<RiskPage />} />
-          <Route path="/copilot" element={<CopilotPage />} />
-          <Route path="/stress" element={<StressTestPage />} />
-          <Route path="/graph" element={<GraphPage />} />
-          <Route path="/audit" element={<AuditPage />} />
-          <Route path="/borrowers" element={<BorrowersPage />} />
-          <Route path="/loans" element={<LoansPage />} />
-          <Route path="/uploads" element={<UploadsPage />} />
-          <Route path="/documents/:agreementId" element={<DocumentDetailPage />} />
+          <Route path="/app" element={<DashboardPage />} />
+          <Route path="/app/risk" element={<RiskPage />} />
+          <Route path="/app/copilot" element={<CopilotPage />} />
+          <Route path="/app/stress" element={<StressTestPage />} />
+          <Route path="/app/graph" element={<GraphPage />} />
+          <Route path="/app/audit" element={<AuditPage />} />
+          <Route path="/app/borrowers" element={<BorrowersPage />} />
+          <Route path="/app/loans" element={<LoansPage />} />
+          <Route path="/app/uploads" element={<UploadsPage />} />
+          <Route path="/app/documents/:agreementId" element={<DocumentDetailPage />} />
+          <Route path="/app/settings/organization" element={<OrganizationSettingsPage />} />
         </Route>
       </Route>
 

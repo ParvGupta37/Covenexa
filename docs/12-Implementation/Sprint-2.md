@@ -1,292 +1,40 @@
-# Sprint 2 — Intelligent Document Processing & Hybrid GraphRAG
+# Sprint 2 — Document Intelligence & AI Pipeline
 
 ## Sprint Goal
 
-Enable Covenexa to transform uploaded loan agreements and financial statements into structured knowledge that powers AI-driven covenant monitoring.
+Build the complete document intelligence pipeline: file upload, SEC EDGAR ingestion, LLM-powered covenant and financial metric extraction, Pinecone vector storage, Redis event bus, and the LangGraph multi-agent document workflow.
 
-At the end of Sprint 2, a user should be able to upload a document and see extracted covenants, financial metrics, and searchable knowledge on the dashboard.
-
----
-
-# Objectives
-
-- Build the complete document ingestion pipeline.
-- Parse and structure documents.
-- Generate semantic embeddings.
-- Build the Knowledge Graph.
-- Extract covenant clauses.
-- Parse financial statements.
-- Implement Hybrid GraphRAG.
-- Display extracted information on the dashboard.
+**Exit Criteria:** User can upload a PDF loan agreement and see extracted covenants and financial metrics in the UI.
 
 ---
 
-# Features
+## Objectives Completed
 
-## 1. Document Upload
-
-Support:
-
-- PDF
-- DOCX
-- XLSX
-- CSV
-
-Each upload creates a Document record with:
-
-- Borrower
-- Document Type
-- Upload Time
-- Processing Status
-
----
-
-## 2. OCR & Parsing
-
-Use:
-
-- LlamaParse
-- OCR fallback
-
-Extract:
-
-- Text
-- Tables
-- Page Numbers
-- Section Hierarchy
+- [x] File upload API (`POST /uploads/` — multipart PDF/DOCX)
+- [x] SEC EDGAR URL ingestion (`POST /uploads/sec-url`)
+- [x] Redis event bus (`event_bus/` module) with `DocumentUploadedEvent`
+- [x] Async Redis subscriber — DocumentUploadedHandler
+- [x] LangGraph DocumentWorkflow (stateful directed graph)
+- [x] DocumentAgent — LlamaIndex parsing + chunk splitting + Cohere embedding → Pinecone
+- [x] CovenantAgent — LLM extraction of covenants (name, metric, threshold, operator)
+- [x] FinancialAgent — LLM extraction of financial figures (revenue, EBITDA, debt, cash, etc.)
+- [x] PostgreSQL schema — Wave 2: document_chunks, covenants, financial_metrics + agreement pipeline columns
+- [x] Alembic migration (`0002_document_intelligence.py`)
+- [x] Pinecone index setup (`covenexa-docs`, 1024-dimension Cohere Embed v4)
+- [x] Document Intelligence API endpoints (`/documents/`)
+- [x] UploadsPage — drag-and-drop upload + status display
+- [x] DocumentDetailPage — chunks, covenants, financial metrics tabs
+- [x] Mock LLM fallback for development without API keys
 
 ---
 
-## 3. Semantic Chunking
-
-Split documents into meaningful chunks.
-
-Each chunk stores:
-
-- Chunk ID
-- Page
-- Section
-- Content
-- Metadata
-
----
-
-## 4. Cohere Embeddings
-
-Generate embeddings using Cohere Embed v4.
-
-Store vectors in Pinecone.
-
-Metadata includes:
-
-- Borrower
-- Document
-- Page
-- Section
-- Document Type
-
----
-
-## 5. Knowledge Graph
-
-Store entities in Neo4j.
-
-Nodes:
-
-- Borrower
-- Loan
-- Agreement
-- Covenant
-- Financial Metric
-- Amendment
-
-Relationships:
-
-- HAS_LOAN
-- HAS_COVENANT
-- AMENDS
-- REFERENCES
-- REPORTS
-
----
-
-## 6. Covenant Extraction Agent
-
-Extract:
-
-- Covenant Name
-- Formula
-- Threshold
-- Frequency
-- Cure Period
-- Event of Default
-- Amendment References
-
-Persist results in PostgreSQL and Neo4j.
-
----
-
-## 7. Financial Statement Parser
-
-Extract:
-
-- Revenue
-- EBITDA
-- Net Income
-- Total Debt
-- Cash
-- Interest Expense
-- Leverage Ratio inputs
-- Interest Coverage inputs
-
-Store structured financial metrics in PostgreSQL.
-
----
-
-## 8. Hybrid GraphRAG
-
-Implement retrieval using:
-
-- Pinecone (semantic search)
-- Neo4j (relationship search)
-- PostgreSQL (structured metadata)
-
-Retrieval Flow:
-
-User Query
-
-↓
-
-Planner
-
-↓
-
-Hybrid Retriever
-
-↓
-
-Vector Search
-
-↓
-
-Graph Search
-
-↓
-
-SQL Lookup
-
-↓
-
-Context Builder
-
-↓
-
-LLM
-
----
-
-## 9. Event-Driven Processing
-
-Workflow:
-
-Document Uploaded
-
-↓
-
-Document Parsed
-
-↓
-
-Chunks Created
-
-↓
-
-Embeddings Generated
-
-↓
-
-Knowledge Graph Updated
-
-↓
-
-Financial Metrics Extracted
-
-↓
-
-Covenants Extracted
-
-↓
-
-Dashboard Updated
-
-Each step publishes events through Redis Pub/Sub.
-
----
-
-## 10. MCP Integration
-
-All agents interact with infrastructure through the MCP Server.
-
-Available tools:
-
-- Read File
-- Write PostgreSQL
-- Read PostgreSQL
-- Read Neo4j
-- Write Neo4j
-- Store Embeddings
-- Retrieve Embeddings
-
----
-
-## 11. Dashboard Integration
-
-Display:
-
-- Uploaded Documents
-- Processing Status
-- Extracted Covenants
-- Financial Metrics
-- Knowledge Graph Statistics
-- Processing Timeline
-- AI Extraction Logs
-
----
-
-# Out of Scope
-
-Do NOT implement:
-
-- Borrower Health Score
-- Default Prediction
-- Portfolio Stress Testing
-- AI Recommendations
-- AI Copilot
-
-These belong to Sprint 3 and Sprint 4.
-
----
-
-# Definition of Done
-
-Sprint 2 is complete when:
-
-✓ Documents upload successfully.
-
-✓ OCR and parsing complete.
-
-✓ Semantic chunks created.
-
-✓ Embeddings stored in Pinecone.
-
-✓ Knowledge Graph populated.
-
-✓ Financial metrics extracted.
-
-✓ Covenants extracted.
-
-✓ PostgreSQL updated.
-
-✓ Hybrid GraphRAG operational.
-
-✓ Dashboard displays extracted information.
+## Key Sprint 2 Decisions
+
+| Decision | Detail |
+|:---------|:-------|
+| LangGraph over LangChain LCEL | LangGraph's stateful graph model better fits the sequential multi-step document pipeline |
+| Redis Pub/Sub over Celery | Simpler infrastructure; no separate worker process needed for v1.0 |
+| SEC URL → synchronous | SEC documents are small enough that async is unnecessary; users want immediate feedback |
+| Pinecone namespace-per-agreement | Enables agreement-level isolation without per-borrower index overhead |
+| Chunking: 1000 tokens, 200 overlap | Balances context completeness with embedding precision |
+| Mock fallback | Allows development and testing without paid API keys |

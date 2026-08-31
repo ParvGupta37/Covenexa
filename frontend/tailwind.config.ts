@@ -18,44 +18,84 @@ const config: Config = {
     },
     extend: {
       colors: {
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
+        border: "var(--border)",
+        input: "var(--input)",
+        ring: "var(--ring)",
+        background: "var(--background)",
+        foreground: "var(--foreground)",
+        brand: {
+          50: "#F3F4FF",
+          100: "#E8ECFF",
+          200: "#C7D2FE",
+          500: "#7C8DFB",
+          600: "#6366F1",
+          700: "#4F46E5",
+        },
+        risk: {
+          high: {
+            bg: "#FEE2E2",
+            text: "#EF4444",
+            border: "#FCA5A5",
+          },
+          watch: {
+            bg: "#FFEDD5",
+            text: "#F97316",
+            border: "#FDBA74",
+          },
+          moderate: {
+            bg: "#FEF3C7",
+            text: "#D97706",
+            border: "#FDE68A",
+          },
+          low: {
+            bg: "#D1FAE5",
+            text: "#10B981",
+            border: "#6EE7B7",
+          },
+        },
         primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
+          DEFAULT: "var(--primary)",
+          foreground: "var(--primary-foreground)",
         },
         secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))",
+          DEFAULT: "var(--secondary)",
+          foreground: "var(--secondary-foreground)",
         },
         destructive: {
-          DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))",
+          DEFAULT: "var(--destructive)",
+          foreground: "var(--destructive-foreground)",
         },
         muted: {
-          DEFAULT: "hsl(var(--muted))",
-          foreground: "hsl(var(--muted-foreground))",
+          DEFAULT: "var(--muted)",
+          foreground: "var(--muted-foreground)",
         },
         accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))",
+          DEFAULT: "var(--accent)",
+          foreground: "var(--accent-foreground)",
         },
         popover: {
-          DEFAULT: "hsl(var(--popover))",
-          foreground: "hsl(var(--popover-foreground))",
+          DEFAULT: "var(--popover)",
+          foreground: "var(--popover-foreground)",
         },
         card: {
-          DEFAULT: "hsl(var(--card))",
-          foreground: "hsl(var(--card-foreground))",
+          DEFAULT: "var(--card)",
+          foreground: "var(--card-foreground)",
         },
       },
+      boxShadow: {
+        card: "0 4px 20px rgba(17, 24, 39, 0.05)",
+        "card-hover": "0 8px 30px rgba(17, 24, 39, 0.08)",
+        dropdown: "0 10px 40px rgba(17, 24, 39, 0.12)",
+      },
       borderRadius: {
+        card: "18px",
+        btn: "12px",
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      fontFamily: {
+        sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
       },
       keyframes: {
         "accordion-down": {

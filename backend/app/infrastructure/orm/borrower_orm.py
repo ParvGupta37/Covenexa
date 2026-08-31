@@ -2,8 +2,8 @@
 SQLAlchemy ORM model for Borrowers.
 """
 import uuid
-
-from sqlalchemy import ForeignKey, Integer, String
+from datetime import datetime
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.domain.entities.borrower import Borrower
@@ -26,6 +26,13 @@ class BorrowerORM(Base):
     risk_rating_level: Mapped[str] = mapped_column(String(20), nullable=False, default=RiskLevel.MEDIUM.value)
     risk_rating_score: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
 
+    # Archival metadata
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
     def to_entity(self) -> Borrower:
         return Borrower(
             id=self.id,
@@ -37,6 +44,9 @@ class BorrowerORM(Base):
                 level=RiskLevel(self.risk_rating_level),
                 score=self.risk_rating_score,
             ),
+            is_archived=self.is_archived,
+            archived_at=self.archived_at,
+            archived_by=self.archived_by,
         )
 
     @classmethod
@@ -49,4 +59,7 @@ class BorrowerORM(Base):
             country=entity.country,
             risk_rating_level=entity.risk_rating.level.value,
             risk_rating_score=entity.risk_rating.score,
+            is_archived=entity.is_archived,
+            archived_at=entity.archived_at,
+            archived_by=entity.archived_by,
         )

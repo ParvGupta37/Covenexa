@@ -1,11 +1,11 @@
 """
 SQLAlchemy ORM model for Loans.
 """
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 import uuid
 
-from sqlalchemy import Date, Float, ForeignKey, Numeric, String
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.domain.entities.loan import Loan, LoanStatus
@@ -33,6 +33,13 @@ class LoanORM(Base):
     maturity_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=LoanStatus.ACTIVE.value)
 
+    # Archival metadata
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
     def to_entity(self) -> Loan:
         return Loan(
             id=self.id,
@@ -43,6 +50,9 @@ class LoanORM(Base):
             start_date=self.start_date,
             maturity_date=self.maturity_date,
             status=LoanStatus(self.status),
+            is_archived=self.is_archived,
+            archived_at=self.archived_at,
+            archived_by=self.archived_by,
         )
 
     @classmethod
@@ -57,4 +67,7 @@ class LoanORM(Base):
             start_date=entity.start_date,
             maturity_date=entity.maturity_date,
             status=entity.status.value,
+            is_archived=entity.is_archived,
+            archived_at=entity.archived_at,
+            archived_by=entity.archived_by,
         )

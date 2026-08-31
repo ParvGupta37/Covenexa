@@ -33,10 +33,11 @@ class RecommendationEngine:
         # 2. Fetch Covenant Monitoring & Facility Details
         res_cov = await session.execute(
             text("""
-                SELECT cm.*, c.name as covenant_name, l.facility_name
+                SELECT cm.*, c.name as covenant_name, l.id as loan_id, l.currency, l.principal_amount
                 FROM covenant_monitoring cm
                 LEFT JOIN covenants c ON c.id = cm.covenant_id
-                LEFT JOIN loans l ON l.id = c.loan_id
+                LEFT JOIN agreements a ON a.id = c.agreement_id
+                LEFT JOIN loans l ON l.id = a.loan_id
                 WHERE cm.borrower_id = :b
             """),
             {"b": borrower_id}
@@ -88,7 +89,9 @@ class RecommendationEngine:
             cur_val = b_cov.get("current_value")
             thr_val = b_cov.get("threshold_value")
             headroom = b_cov.get("headroom_pct")
-            facility = b_cov.get("facility_name") or "Facility"
+            amt = float(b_cov.get("principal_amount") or 0)
+            curr = b_cov.get("currency") or "USD"
+            facility = b_cov.get("facility_name") or (f"Facility ({curr} {amt:,.0f})" if amt > 0 else "Facility")
             status_str = str(b_cov.get("status", "breach")).upper()
 
             cur_str = f"{cur_val:.2f}" if isinstance(cur_val, (int, float)) else "N/A"
@@ -112,7 +115,9 @@ class RecommendationEngine:
             cur_val = w_cov.get("current_value")
             thr_val = w_cov.get("threshold_value")
             headroom = w_cov.get("headroom_pct")
-            facility = w_cov.get("facility_name") or "Facility"
+            w_amt = float(w_cov.get("principal_amount") or 0)
+            w_curr = w_cov.get("currency") or "USD"
+            facility = w_cov.get("facility_name") or (f"Facility ({w_curr} {w_amt:,.0f})" if w_amt > 0 else "Facility")
 
             cur_str = f"{cur_val:.2f}" if isinstance(cur_val, (int, float)) else "N/A"
             thr_str = f"{thr_val:.2f}" if isinstance(thr_val, (int, float)) else "N/A"

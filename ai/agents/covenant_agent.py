@@ -76,6 +76,20 @@ class CovenantAgent(BaseAgent):
         logger.info("covenant_agent.extracted_covenants", count=len(covenants_list))
 
         # 5. Save to PostgreSQL and Neo4j via MCP
+        # Clean up any existing covenants extracted for this agreement (Idempotency)
+        if agreement_id:
+            try:
+                await self._mcp.execute_tool(
+                    tool_name="postgres",
+                    operation="execute_write",
+                    params={
+                        "query": "DELETE FROM covenants WHERE agreement_id = :aid",
+                        "params": {"aid": agreement_id}
+                    }
+                )
+            except Exception as exc:
+                logger.warning("covenant_agent.cleanup_failed", error=str(exc))
+
         for cov in covenants_list:
             cov_id = str(uuid.uuid4())
             

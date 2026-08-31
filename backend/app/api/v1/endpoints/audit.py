@@ -38,7 +38,7 @@ async def log_audit_event(
     user_email: Optional[str] = None,
     details: Optional[dict] = None,
     ip_address: Optional[str] = None,
-    session: Optional[Any] = None,  # kept for backwards-compat but ignored
+    session: Optional[Any] = None,
 ) -> None:
     """Persist audit log events via an independent DB session."""
     from app.core.dependencies import postgres_client
@@ -80,19 +80,29 @@ async def list_audit_logs(
     action: Optional[str] = None,
     resource_type: Optional[str] = None,
     session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
 ) -> List[dict]:
-    """Retrieve audit activity history with filtering and pagination."""
-    query = "SELECT * FROM audit_logs WHERE 1=1"
-    params = {"limit": limit}
+    """Retrieve audit activity history for the authenticated user's organization."""
+    user_org_id = current_user.organization_id if isinstance(current_user, User) else getattr(current_user, "organization_id", None)
+    if user_org_id:
+        query = """
+            SELECT a.* FROM audit_logs a
+            LEFT JOIN users u ON a.user_id = u.id
+            WHERE (u.organization_id = :org_id OR a.resource_id = :org_id)
+        """
+        params = {"org_id": user_org_id, "limit": limit}
+    else:
+        query = "SELECT * FROM audit_logs a WHERE 1=1"
+        params = {"limit": limit}
 
     if action:
-        query += " AND action = :action"
+        query += " AND a.action = :action"
         params["action"] = action
     if resource_type:
-        query += " AND resource_type = :resource_type"
+        query += " AND a.resource_type = :resource_type"
         params["resource_type"] = resource_type
 
-    query += " ORDER BY created_at DESC LIMIT :limit"
+    query += " ORDER BY a.created_at DESC LIMIT :limit"
 
     result = await session.execute(text(query), params)
     rows = result.mappings().all()

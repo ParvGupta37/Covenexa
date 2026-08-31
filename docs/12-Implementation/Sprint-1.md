@@ -2,235 +2,73 @@
 
 ## Sprint Goal
 
-Build the complete enterprise foundation for Covenexa, including backend architecture, frontend architecture, authentication, infrastructure, and AI scaffolding.
+Build the complete enterprise foundation for Covenexa: backend DDD architecture, PostgreSQL schema (Wave 1), authentication, RBAC, Docker infrastructure, frontend routing and layout, and AI scaffolding.
 
-By the end of Sprint 1, users should be able to log into the platform, navigate the dashboard, upload documents (UI), and have a scalable architecture ready for AI features.
-
----
-
-# Objectives
-
-- Establish Clean Architecture.
-- Build backend foundation.
-- Build frontend foundation.
-- Configure PostgreSQL.
-- Implement authentication.
-- Setup RBAC.
-- Configure Docker.
-- Build AI infrastructure.
-- Build Multi-Agent framework.
-- Create dashboard UI.
-- Prepare the platform for Sprint 2.
+**Exit Criteria:** User can register, log in, see a dashboard skeleton, and the backend API is documented.
 
 ---
 
-# Features
+## Objectives Completed
 
-## 1. Backend Foundation
-
-Create a FastAPI backend following Clean Architecture.
-
-Layers:
-
-- Presentation
-- Application
-- Domain
-- Infrastructure
-
----
-
-## 2. Frontend Foundation
-
-Build a React + Vite application with:
-
-- TailwindCSS
-- Routing
-- Layout
-- Authentication pages
-- Dashboard pages
+- [x] Clean Architecture (DDD) — 4 layers: API, Application, Domain, Infrastructure
+- [x] FastAPI backend with async SQLAlchemy
+- [x] PostgreSQL schema — Wave 1: organizations, users, borrowers, loans, agreements, financial_statements, compliance_results, reports
+- [x] Alembic migrations (`0001_initial_schema.py`)
+- [x] JWT authentication (access + refresh tokens)
+- [x] RBAC middleware (ADMIN / ANALYST roles)
+- [x] bcrypt password hashing with strength validation
+- [x] React 18 + TypeScript + Vite frontend
+- [x] React Router v6 route map
+- [x] Zustand stores: auth.store, company.store
+- [x] Axios API client with auth interceptor
+- [x] Custom CSS design system (Inter font, navy/indigo palette)
+- [x] Sidebar + Topbar layout
+- [x] Dashboard skeleton
+- [x] Docker Compose (PostgreSQL, Redis, Neo4j)
+- [x] OpenAPI docs at `/docs`
+- [x] AI scaffolding: BaseAgent, agent registry, LangGraph dependency setup
 
 ---
 
-## 3. PostgreSQL Database
+## Architecture Established
 
-Configure PostgreSQL with:
+### Backend Layer Structure
+```
+backend/
+├── app/
+│   ├── api/v1/endpoints/   # FastAPI route handlers
+│   ├── application/        # Use case handlers (command/query)
+│   │   ├── commands/
+│   │   ├── handlers/
+│   │   └── queries/
+│   ├── domain/             # Business entities, value objects, services
+│   │   ├── entities/
+│   │   ├── services/
+│   │   └── value_objects/
+│   └── infrastructure/     # DB repos, external adapters
+│       └── repositories/
+```
 
-- Users
-- Borrowers
-- Loans
-- Documents
-- Covenants
-- Financial Metrics
-
-Implement Alembic migrations.
-
----
-
-## 4. Authentication
-
-Implement secure authentication using:
-
-- JWT
-- Access Tokens
-- Password Hashing
-- Login
-- Registration
-- Refresh Tokens
-
----
-
-## 5. Role-Based Access Control (RBAC)
-
-Support roles such as:
-
-- Admin
-- Analyst
-- Viewer
-
-Protect routes and APIs based on permissions.
+### Frontend Structure
+```
+frontend/src/
+├── pages/          # One folder per route
+├── components/
+│   ├── shared/     # Reusable UI components
+│   └── layout/     # Sidebar, Topbar, AppLayout
+├── store/          # Zustand stores
+├── lib/            # api.ts (Axios), utils
+└── types/          # TypeScript interfaces
+```
 
 ---
 
-## 6. AI Infrastructure
+## Key Sprint 1 Decisions
 
-Prepare the AI layer for future development.
-
-Create scaffolding for:
-
-- Agents
-- Prompts
-- Retrieval
-- LLM abstraction
-- Memory
-
-No business logic yet.
-
----
-
-## 7. Multi-Agent Framework
-
-Define the agent architecture.
-
-Agents include:
-
-- Planner Agent
-- Document Agent
-- Covenant Agent
-- Financial Agent
-- Portfolio Agent
-- Monitoring Agent
-- Recommendation Agent
-- Reporting Agent
-
-Only create the framework and communication layer.
-
----
-
-## 8. MCP Server
-
-Implement the Model Context Protocol server.
-
-Expose tools for:
-
-- PostgreSQL
-- Neo4j
-- Pinecone
-- File System
-
-Agents will use MCP for all external interactions.
-
----
-
-## 9. Event Bus
-
-Setup Redis Pub/Sub for asynchronous communication.
-
-Enable event-driven workflows for future processing.
-
----
-
-## 10. Dashboard UI
-
-Create pages for:
-
-- Dashboard
-- Borrowers
-- Loans & Covenants
-- File Ingestion
-
-Use mock data where necessary.
-
----
-
-## 11. Infrastructure
-
-Configure:
-
-- Docker
-- Docker Compose
-- Environment Variables
-- Logging
-- Configuration Management
-
----
-
-## 12. Documentation
-
-Complete:
-
-- Project documentation
-- Architecture documentation
-- API structure
-- Folder structure
-- Development guidelines
-
----
-
-# Out of Scope
-
-Do NOT implement:
-
-- OCR
-- LlamaParse
-- GraphRAG
-- Pinecone
-- Neo4j
-- Covenant Extraction
-- Financial Analysis
-- Borrower Health Score
-- Default Prediction
-- Stress Testing
-- AI Recommendations
-- AI Copilot
-
-These are covered in later sprints.
-
----
-
-# Definition of Done
-
-Sprint 1 is complete when:
-
-✓ Backend architecture established.
-
-✓ Frontend architecture established.
-
-✓ PostgreSQL configured.
-
-✓ Authentication operational.
-
-✓ RBAC implemented.
-
-✓ Docker configured.
-
-✓ MCP server functional.
-
-✓ Event bus configured.
-
-✓ Multi-agent framework scaffolded.
-
-✓ Dashboard pages available.
-
-✓ Documentation completed.
-
-✓ Platform ready for intelligent document processing in Sprint 2.
+| Decision | Detail |
+|:---------|:-------|
+| DDD over MVC | Forces clean separation; scales better for complex domain logic |
+| Async SQLAlchemy | Required for FastAPI's async nature |
+| Zustand over Redux | Simpler for a medium-complexity SaaS app |
+| Vanilla CSS | Full design control without Tailwind's utility-class complexity |
+| JWT stateless | No server-side session store needed |

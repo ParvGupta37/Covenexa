@@ -1,18 +1,20 @@
 """
-Borrower Health Score Engine — Sprint 3 (Phase 2B: HIGH-3 fix).
+Borrower Health Score Engine — Sprint 3.
 
-RULES:
-  - None ratio from financial_engine → omitted from formula (not treated as 0).
-  - Coverage term is capped at MAX_COVERAGE_CAP before use in any formula.
-  - No-data path does not give a gratuitous +10 baseline boost.
-  - Calculated per-component; breakdown explicitly marks unavailable components.
-Calculates borrower health score (0–100) based on weighted factors:
+Calculates borrower health score (0–100) based on 5 weighted dimensions:
   - Financial Performance (30%)
   - Covenant Compliance  (25%)
-  - Liquidity            (15%)
+  - Liquidity            (20%)
   - Leverage             (15%)
   - Historical Trend     (10%)
-  - AI Confidence         (5%)
+
+RULES:
+  - Dynamic weight re-normalization: Only available components contribute to score and denominator.
+  - Unavailable components (None / N/A) contribute 0 weight to both numerator and denominator.
+  - Actual measured zero (0.0) contributes 0 points but retains its weight in denominator.
+  - Trend score is evaluated from historical delta before final weighted synthesis.
+  - None ratio from financial_engine → omitted from formula (not treated as 0).
+  - Coverage term is capped at MAX_COVERAGE_CAP before use in any formula.
 """
 from __future__ import annotations
 
@@ -25,6 +27,13 @@ from typing import Optional, Dict, Any
 logger = structlog.get_logger(__name__)
 
 MAX_COVERAGE_CAP = 50.0
+
+# 5 Canonical Factor Weights (Sum = 1.00)
+W_FINANCIAL = 0.30
+W_COMPLIANCE = 0.25
+W_LIQUIDITY = 0.20
+W_LEVERAGE = 0.15
+W_TREND = 0.10
 
 
 class HealthScoreResult:
@@ -75,12 +84,10 @@ class HealthScoreEngine:
         breaches = cov_counts.get("breach", 0) + cov_counts.get("critical", 0)
         warnings = cov_counts.get("warning", 0)
 
-        compliance_score = 100.0 - (breaches * 30.0) - (warnings * 10.0)
+        compliance_score: Optional[float] = 100.0 - (breaches * 30.0) - (warnings * 10.0)
         compliance_score = max(0.0, min(100.0, compliance_score))
 
         # ── 3. Fetch previous health score for trend calculation ───────────
-        # MEDIUM-3 fix: real trend from historical data; None on first run.
-        # None = no prior data (not a fabricated neutral value).
         res_prev = await session.execute(
             text("""
                 SELECT score FROM borrower_health_scores
@@ -91,23 +98,20 @@ class HealthScoreEngine:
             {"b": borrower_id}
         )
         prev_row = res_prev.mappings().first()
-        prev_score: Optional[float] = float(prev_row["score"]) if prev_row else None
+        prev_score: Optional[float] = float(prev_row["score"]) if prev_row and prev_row.get("score") is not None else None
 
-        # ── 3. Compute component scores ────────────────────────────────────
+        # ── 4. Compute component scores ────────────────────────────────────
         fin_score: Optional[float] = None
         leverage_score: Optional[float] = None
         liquidity_score: Optional[float] = None
         trend_score: Optional[float] = None
-        ai_confidence_score: float = 50.0
 
         if fin:
-            # Raw values — None preserved for denominator-sensitive fields.
             rev: float = float(fin["revenue"]) if fin.get("revenue") is not None else 0.0
             ebitda: Optional[float] = float(fin["ebitda"]) if fin.get("ebitda") is not None else None
             debt: float = float(fin["total_debt"]) if fin.get("total_debt") is not None else 0.0
             cash: float = float(fin["cash"]) if fin.get("cash") is not None else 0.0
 
-            # Derived ratios — read from already-computed DB columns (may be NULL/None).
             leverage: Optional[float] = (
                 float(fin["leverage_ratio"]) if fin.get("leverage_ratio") is not None else None
             )
@@ -115,24 +119,18 @@ class HealthScoreEngine:
                 float(fin["interest_coverage"]) if fin.get("interest_coverage") is not None else None
             )
 
-            # ── Financial score (margin + bounded coverage contribution) ────
-            # Margin is always calculable if revenue > 0 and ebitda is not None.
+            # ── Financial Score ─────────────────────────────────────────────
             if ebitda is not None and rev > 0:
                 margin = ebitda / rev
-                # Coverage term: cap at MAX_COVERAGE_CAP before multiplying.
-                # Without this cap a 419M× coverage → +4.19B pts → always 100.
                 cov_for_formula = min(coverage, MAX_COVERAGE_CAP) if coverage is not None else 0.0
                 fin_score = min(100.0, max(0.0, (margin * 200.0) + (cov_for_formula * 10.0)))
             elif ebitda is not None:
-                # Have EBITDA but no revenue — use coverage only.
                 cov_for_formula = min(coverage, MAX_COVERAGE_CAP) if coverage is not None else 0.0
                 fin_score = min(100.0, max(0.0, 40.0 + (cov_for_formula * 5.0)))
             else:
-                # EBITDA unavailable — financial score cannot be computed.
                 fin_score = None
 
-            # ── Leverage score ──────────────────────────────────────────────
-            # None leverage (incalculable) ≠ zero leverage (perfect balance sheet).
+            # ── Leverage Score ──────────────────────────────────────────────
             if leverage is not None:
                 if leverage <= 2.0:
                     leverage_score = 95.0
@@ -143,11 +141,9 @@ class HealthScoreEngine:
                 else:
                     leverage_score = 30.0
             else:
-                # Leverage incalculable — cannot assign a good score.
-                # Use neutral-low: 50 (neither penalised nor rewarded).
                 leverage_score = None
 
-            # ── Liquidity score ─────────────────────────────────────────────
+            # ── Liquidity Score ─────────────────────────────────────────────
             if debt > 0:
                 liquidity_score = min(100.0, max(0.0, (cash / debt * 300.0)))
             elif cash > 0:
@@ -155,73 +151,74 @@ class HealthScoreEngine:
             else:
                 liquidity_score = 50.0
 
-            trend_score = None  # Calculated below after total_score is known.
-            # Confidence: high only if core metrics are present and non-zero.
-            has_core = ebitda is not None and rev > 0
-            ai_confidence_score = 90.0 if has_core else 60.0
+        # ── 5. Preliminary Base Score & Historical Trend Score ──────────────
+        # Base operational score from available fundamental dimensions
+        base_num, base_den = 0.0, 0.0
+        if fin_score is not None:
+            base_num += fin_score * W_FINANCIAL
+            base_den += W_FINANCIAL
+        if compliance_score is not None:
+            base_num += compliance_score * W_COMPLIANCE
+            base_den += W_COMPLIANCE
+        if liquidity_score is not None:
+            base_num += liquidity_score * W_LIQUIDITY
+            base_den += W_LIQUIDITY
+        if leverage_score is not None:
+            base_num += leverage_score * W_LEVERAGE
+            base_den += W_LEVERAGE
 
-        # ── 4. Weighted total score ────────────────────────────────────────
-        if fin:
-            # Use only calculable components; replace None with a neutral 50
-            # but reduce the effective weight of missing components.
-            def weighted(score: Optional[float], weight: float) -> tuple[float, float]:
-                """Return (contributed_score, effective_weight)."""
-                if score is None:
-                    return 0.0, 0.0   # missing component contributes nothing
-                return score * weight, weight
+        prelim_base_score = (base_num / base_den) if base_den > 0 else compliance_score
 
-            pts_fin, w_fin         = weighted(fin_score, 0.30)
-            pts_comp, w_comp       = (compliance_score * 0.25, 0.25)
-            pts_liq, w_liq         = weighted(liquidity_score, 0.15)
-            pts_lev, w_lev         = weighted(leverage_score, 0.15)
-            pts_trend, w_trend     = weighted(trend_score, 0.10)
-            pts_conf, w_conf       = (ai_confidence_score * 0.05, 0.05)
-
-            total_weight = w_fin + w_comp + w_liq + w_lev + w_trend + w_conf
-
-            if total_weight > 0:
-                # Re-normalise so missing components don't deflate the score
-                # below what the available information supports.
-                total_score = (pts_fin + pts_comp + pts_liq + pts_lev + pts_trend + pts_conf) / total_weight
-            else:
-                total_score = 0.0
-        else:
-            # No financial data at all.
-            # Score based purely on compliance — no gratuitous baseline boost.
-            total_score = compliance_score * 0.50
-
-        total_score = max(0.0, min(100.0, total_score))
-
-        # ── 5. Compute trend score from historical delta (MEDIUM-3) ─────────
-        # trend_score = None means "no prior run, no trend calculable".
-        # When prior score exists, map delta to [0, 100]:
-        #   delta > 0 (improving) → score > 80; delta < 0 (deteriorating) → score < 80.
-        #   Capped so a +20pt jump still gives 100, -20pt gives 40.
         if prev_score is not None:
-            delta = total_score - prev_score
+            delta = prelim_base_score - prev_score
             trend_score = max(0.0, min(100.0, 80.0 + (delta * 2.0)))
         else:
-            trend_score = None  # First run — no trend data available.
+            trend_score = None  # First run — no prior health score available
 
+        # ── 6. Final Dynamic Weight Re-normalization ────────────────────────
+        # Each available factor contributes score * weight to numerator and weight to denominator.
+        # Unavailable factors (None) contribute 0 to both, preserving mathematical consistency.
+        def weighted_term(score: Optional[float], weight: float) -> tuple[float, float]:
+            if score is None:
+                return 0.0, 0.0
+            return score * weight, weight
+
+        pts_fin, w_fin       = weighted_term(fin_score, W_FINANCIAL)
+        pts_comp, w_comp     = weighted_term(compliance_score, W_COMPLIANCE)
+        pts_liq, w_liq       = weighted_term(liquidity_score, W_LIQUIDITY)
+        pts_lev, w_lev       = weighted_term(leverage_score, W_LEVERAGE)
+        pts_trend, w_trend   = weighted_term(trend_score, W_TREND)
+
+        total_weight = w_fin + w_comp + w_liq + w_lev + w_trend
+
+        if fin is None:
+            # When zero financial records exist, score is based on compliance with 50% data haircut
+            total_score = (compliance_score * 0.50) if compliance_score is not None else 50.0
+        elif total_weight > 0:
+            total_score = (pts_fin + pts_comp + pts_liq + pts_lev + pts_trend) / total_weight
+        else:
+            total_score = (compliance_score * 0.50) if compliance_score is not None else 50.0
+
+        total_score = max(0.0, min(100.0, total_score))
         category = self._determine_category(total_score)
 
-        # ── 5. Build breakdown (None for unavailable components) ───────────
+        # ── 7. Build Breakdown Dictionary ───────────────────────────────────
         breakdown = {
-            "financial_score":    round(fin_score, 1) if fin_score is not None else None,
-            "compliance_score":   round(compliance_score, 1),
-            "liquidity_score":    round(liquidity_score, 1) if liquidity_score is not None else None,
-            "leverage_score":     round(leverage_score, 1) if leverage_score is not None else None,
-            "trend_score":        round(trend_score, 1) if trend_score is not None else None,
-            "ai_confidence_score": round(ai_confidence_score, 1),
+            "financial_score":  round(fin_score, 1) if fin_score is not None else None,
+            "compliance_score": round(compliance_score, 1) if compliance_score is not None else None,
+            "liquidity_score":  round(liquidity_score, 1) if liquidity_score is not None else None,
+            "leverage_score":   round(leverage_score, 1) if leverage_score is not None else None,
+            "trend_score":      round(trend_score, 1) if trend_score is not None else None,
         }
 
         explanation = (
             f"Health Score is {round(total_score, 1)} ({category.upper()}). "
-            f"Financial performance: {f'{round(fin_score, 1)}/100' if fin_score is not None else 'N/A'}, "
-            f"Compliance: {round(compliance_score, 1)}/100."
+            f"Compliance: {f'{round(compliance_score, 1)}/100' if compliance_score is not None else 'N/A'}, "
+            f"Liquidity: {f'{round(liquidity_score, 1)}/100' if liquidity_score is not None else 'N/A'}, "
+            f"Financial performance: {f'{round(fin_score, 1)}/100' if fin_score is not None else 'N/A'}."
         )
 
-        # ── 6. Persist to borrower_health_scores ────────────────────────────
+        # ── 8. Persist to borrower_health_scores ────────────────────────────
         score_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
         await session.execute(
@@ -237,7 +234,7 @@ class HealthScoreEngine:
                 "score": round(total_score, 1),
                 "cat": category,
                 "fin": round(fin_score, 1) if fin_score is not None else None,
-                "comp": round(compliance_score, 1),
+                "comp": round(compliance_score, 1) if compliance_score is not None else None,
                 "liq": round(liquidity_score, 1) if liquidity_score is not None else None,
                 "lev": round(leverage_score, 1) if leverage_score is not None else None,
                 "tr": round(trend_score, 1) if trend_score is not None else None,

@@ -3,7 +3,7 @@ Document Processing API Schemas — Sprint 2.
 """
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field
 
 
@@ -69,4 +69,5 @@ class FinancialMetricSchema(BaseModel):
     leverage_ratio: Optional[float] = None
     interest_coverage: Optional[float] = None
     currency: str = "USD"
+    extraction_metadata: Optional[Dict[str, Any]] = None
     extracted_at: datetime

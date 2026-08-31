@@ -211,7 +211,7 @@ class TestCovenantFormulaMapping:
                     "leverage_ratio": 3.2, "interest_coverage": 5.0,
                     "dscr": None, "total_debt": 1_000_000.0,
                 }
-            elif "SELECT * FROM covenants" in q:
+            elif "FROM covenants" in q:
                 r.mappings.return_value.all.return_value = [{
                     "id": "cov-1",
                     "name": "Senior Secured Indebtedness Ratio",  # no 'leverage' keyword
@@ -248,7 +248,7 @@ class TestCovenantFormulaMapping:
                     "leverage_ratio": 2.5, "interest_coverage": 4.0,
                     "dscr": None, "total_debt": 500_000.0,
                 }
-            elif "SELECT * FROM covenants" in q:
+            elif "FROM covenants" in q:
                 r.mappings.return_value.all.return_value = [{
                     "id": "cov-2",
                     "name": "Maximum Leverage Covenant",

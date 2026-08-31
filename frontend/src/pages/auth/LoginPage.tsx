@@ -1,16 +1,23 @@
 import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Sparkles, Key, Mail, AlertCircle } from "lucide-react";
+import { Link, useNavigate, Navigate } from "react-router-dom";
+import { Sparkles, Key, Mail, AlertCircle, Loader2 } from "lucide-react";
 import api from "@/lib/api";
 import { useAuthStore } from "@/store/auth.store";
 
 export function LoginPage() {
   const navigate = useNavigate();
   const loginStore = useAuthStore((state) => state.login);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const isLoading = useAuthStore((state) => state.isLoading);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  if (!isLoading && isAuthenticated) {
+    return <Navigate to="/app" replace />;
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,19 +26,27 @@ export function LoginPage() {
 
     try {
       // 1. Authenticate credentials
-      const loginRes = await api.post("/api/v1/auth/login", { email, password });
-      const { access_token, refresh_token } = loginRes.data;
-
-      // 2. Fetch authenticated profile details
-      const profileRes = await api.get("/api/v1/auth/me", {
-        headers: { Authorization: `Bearer ${access_token}` },
+      const loginRes = await api.post("/api/v1/auth/login", {
+        email: email.trim().toLowerCase(),
+        password,
       });
 
-      // 3. Cache tokens and profiles in store
-      loginStore(profileRes.data, access_token, refresh_token);
-      navigate("/");
+      const { access_token, refresh_token, user } = loginRes.data;
+
+      // 2. Cache tokens and user in store
+      loginStore(user, access_token, refresh_token);
+
+      // 3. Move cleanly to Dashboard using replace to preserve clean back navigation
+      navigate("/app", { replace: true });
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Authentication failed. Check credentials.");
+      const detail = err.response?.data?.detail;
+      setError(
+        typeof detail === "string"
+          ? detail
+          : Array.isArray(detail)
+          ? detail.map((d: any) => d.msg).join(", ")
+          : "Authentication failed. Please verify your email and password."
+      );
     } finally {
       setLoading(false);
     }
@@ -52,7 +67,7 @@ export function LoginPage() {
         {/* Input Form */}
         <form className="mt-8 space-y-4" onSubmit={handleSubmit}>
           {error && (
-            <div className="p-3 bg-destructive/10 border border-destructive/20 text-destructive text-sm rounded-lg flex items-center gap-2">
+            <div className="p-3.5 bg-destructive/10 border border-destructive/20 text-destructive text-xs rounded-xl flex items-center gap-2">
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span>{error}</span>
             </div>
@@ -68,7 +83,7 @@ export function LoginPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@covenexa.ai"
+                  placeholder="name@covenexa.in"
                   className="w-full bg-background border border-border rounded-lg pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all placeholder:text-muted-foreground/40"
                 />
               </div>
@@ -93,18 +108,25 @@ export function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full mt-4 flex justify-center py-2.5 px-4 border border-transparent rounded-lg text-sm font-semibold text-primary-foreground bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            className="w-full mt-4 flex items-center justify-center py-2.5 px-4 border border-transparent rounded-lg text-sm font-semibold text-primary-foreground bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all gap-2"
           >
-            {loading ? "Authenticating..." : "Sign In"}
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Authenticating...</span>
+              </>
+            ) : (
+              "Sign In"
+            )}
           </button>
         </form>
 
         {/* Footer Redirect link */}
         <div className="text-center pt-2">
           <p className="text-xs text-muted-foreground">
-            Don't have an account?{" "}
+            Don't have an organization account?{" "}
             <Link to="/register" className="font-semibold text-primary hover:text-primary/80 transition-colors">
-              Request Platform Access
+              Create Lender Account
             </Link>
           </p>
         </div>

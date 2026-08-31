@@ -12,14 +12,15 @@ Provides endpoints for:
 - GET  /risk/distribution
 - GET  /risk/graph/{borrower_id}
 """
+import re
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db_session, require_role
-from app.domain.entities.user import UserRole
+from app.core.dependencies import get_db_session, require_role, get_current_user
+from app.domain.entities.user import User, UserRole
 from ai.engines.pipeline_runner import RiskIntelligencePipeline
 from ai.engines.stress_tester import StressTester
 
@@ -103,14 +104,16 @@ async def get_borrower_health(
 @router.get("/portfolio", dependencies=[Depends(require_role(_ALLOWED_ROLES))])
 async def get_portfolio_risk_summary(session: AsyncSession = Depends(get_db_session)) -> Dict[str, Any]:
     """Aggregates portfolio-wide risk metrics strictly from calculated database entries."""
-    res_b = await session.execute(text("SELECT COUNT(*) FROM borrowers"))
+    res_b = await session.execute(text("SELECT COUNT(*) FROM borrowers WHERE is_archived = FALSE"))
     total_borrowers = res_b.scalar() or 0
 
     res_scores = await session.execute(
         text("""
-            SELECT DISTINCT ON (borrower_id) score, category 
-            FROM borrower_health_scores 
-            ORDER BY borrower_id, calculated_at DESC
+            SELECT DISTINCT ON (bhs.borrower_id) bhs.score, bhs.category 
+            FROM borrower_health_scores bhs
+            JOIN borrowers b ON bhs.borrower_id = b.id
+            WHERE b.is_archived = FALSE
+            ORDER BY bhs.borrower_id, bhs.calculated_at DESC
         """)
     )
     scores_rows = res_scores.mappings().all()
@@ -132,17 +135,31 @@ async def get_portfolio_risk_summary(session: AsyncSession = Depends(get_db_sess
               else ("HIGH" if portfolio_risk_score is not None else "NO DATA"))
     )
 
-    res_breaches = await session.execute(text("SELECT COUNT(*) FROM covenant_monitoring WHERE status IN ('breach', 'critical')"))
+    res_breaches = await session.execute(
+        text("""
+            SELECT COUNT(*) FROM covenant_monitoring cm
+            JOIN covenants c ON cm.covenant_id = c.id
+            JOIN borrowers b ON c.borrower_id = b.id
+            WHERE cm.status IN ('breach', 'critical') AND b.is_archived = FALSE
+        """)
+    )
     active_breaches = res_breaches.scalar() or 0
 
-    res_alerts = await session.execute(text("SELECT COUNT(*) FROM alerts WHERE is_read = FALSE"))
+    res_alerts = await session.execute(
+        text("""
+            SELECT COUNT(*) FROM alerts a
+            JOIN borrowers b ON a.borrower_id = b.id
+            WHERE a.is_read = FALSE AND b.is_archived = FALSE
+        """)
+    )
     active_alerts = res_alerts.scalar() or 0
 
     res_high_risk = await session.execute(
         text("""
-            SELECT COUNT(DISTINCT borrower_id) 
-            FROM borrower_health_scores 
-            WHERE category IN ('high_risk', 'critical')
+            SELECT COUNT(DISTINCT bhs.borrower_id) 
+            FROM borrower_health_scores bhs
+            JOIN borrowers b ON bhs.borrower_id = b.id
+            WHERE bhs.category IN ('high_risk', 'critical') AND b.is_archived = FALSE
         """)
     )
     high_risk_count = res_high_risk.scalar() or 0
@@ -183,9 +200,11 @@ async def get_risk_distribution(session: AsyncSession = Depends(get_db_session))
     result = await session.execute(
         text("""
             WITH latest_scores AS (
-                SELECT DISTINCT ON (borrower_id) category
-                FROM borrower_health_scores
-                ORDER BY borrower_id, calculated_at DESC
+                SELECT DISTINCT ON (bhs.borrower_id) bhs.category
+                FROM borrower_health_scores bhs
+                JOIN borrowers b ON bhs.borrower_id = b.id
+                WHERE b.is_archived = FALSE
+                ORDER BY bhs.borrower_id, bhs.calculated_at DESC
             )
             SELECT category, COUNT(*) as cnt
             FROM latest_scores
@@ -248,14 +267,20 @@ async def get_monitored_covenants(
     borrower_id: str,
     session: AsyncSession = Depends(get_db_session)
 ) -> List[Dict[str, Any]]:
-    """Returns evaluated covenant compliance statuses with headroom and reasons."""
+    """Returns evaluated covenant compliance statuses with headroom and reasons for active loans."""
     result = await session.execute(
         text("""
-            SELECT cm.*, c.name as covenant_name, c.covenant_type, c.raw_text
+            SELECT DISTINCT ON (c.name, COALESCE(a.loan_id, 'none'))
+                cm.*, c.name as covenant_name, c.covenant_type, c.raw_text, a.loan_id
             FROM covenant_monitoring cm
             JOIN covenants c ON cm.covenant_id = c.id
+            LEFT JOIN agreements a ON c.agreement_id = a.id
+            LEFT JOIN loans l ON a.loan_id = l.id
+            JOIN borrowers b ON cm.borrower_id = b.id
             WHERE cm.borrower_id = :b
-            ORDER BY cm.checked_at DESC
+              AND (l.is_archived IS NULL OR l.is_archived = FALSE)
+              AND b.is_archived = FALSE
+            ORDER BY c.name, COALESCE(a.loan_id, 'none'), cm.checked_at DESC
         """),
         {"b": borrower_id}
     )
@@ -303,13 +328,18 @@ async def get_ai_recommendations(
 @router.get("/graph/{borrower_id}", dependencies=[Depends(require_role(_ALLOWED_ROLES))])
 async def get_borrower_knowledge_graph(
     borrower_id: str,
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ) -> Dict[str, Any]:
-    """Dynamically builds Knowledge Graph nodes and edges from PostgreSQL data."""
-    # 1. Borrower node
+    """Dynamically builds Knowledge Graph nodes and edges from PostgreSQL data with tenant isolation and deduplication."""
+    # 1. Borrower node with strict tenant isolation and archive check
     res_b = await session.execute(
-        text("SELECT id, company_name, sector, country, risk_rating_level FROM borrowers WHERE id = :b"),
-        {"b": borrower_id}
+        text("""
+            SELECT id, company_name, sector, country, risk_rating_level
+            FROM borrowers
+            WHERE id = :b AND organization_id = :org_id AND is_archived = FALSE
+        """),
+        {"b": borrower_id, "org_id": current_user.organization_id}
     )
     b = res_b.mappings().first()
     if not b:
@@ -327,78 +357,111 @@ async def get_borrower_knowledge_graph(
             "id": b["id"],
             "label": b["company_name"],
             "type": "borrower",
-            "details": f"Borrower | Sector: {b['sector']} | Country: {b['country']} | Rating: {b['risk_rating_level']} | {health_str}",
+            "details": f"Borrower: {b['company_name']} | Sector: {b['sector']} | Country: {b['country']} | Rating: {b['risk_rating_level']} | {health_str}",
             "x": 100,
             "y": 220
         }
     ]
     edges = []
 
-    # 2. Loans for borrower
+    # 2. Loans for borrower (active only)
     res_loans = await session.execute(
-        text("SELECT id, principal_amount, currency, interest_rate, status FROM loans WHERE borrower_id = :b"),
+        text("""
+            SELECT id, agreement_id, principal_amount, currency, interest_rate, status
+            FROM loans
+            WHERE borrower_id = :b AND is_archived = FALSE
+            ORDER BY start_date DESC
+        """),
         {"b": borrower_id}
     )
     loans = res_loans.mappings().all()
 
-    loan_y = 120
     for idx, l in enumerate(loans):
         l_node_id = f"loan_{l['id']}"
-        l_amount = float(l['principal_amount']) if l['principal_amount'] else 0
+        l_amount = float(l["principal_amount"]) if l["principal_amount"] else 0.0
+        l_curr = l["currency"] or "USD"
+        l_y = 130 + (idx * 140)
+
         nodes.append({
             "id": l_node_id,
-            "label": f"Loan {l['id'][:8]} (${l_amount:,.0f})",
+            "label": f"Facility ({l_curr} ${l_amount/1e6:.1f}M)",
             "type": "loan",
-            "details": f"Loan Facility | Principal: {l['currency']} ${l_amount:,.2f} | Interest Rate: {l['interest_rate']}% | Status: {l['status']}",
+            "details": f"Loan Facility | Principal: {l_curr} ${l_amount:,.2f} | Status: {l['status']}",
             "x": 280,
-            "y": loan_y + (idx * 100)
+            "y": l_y
         })
         edges.append({"from": b["id"], "to": l_node_id})
 
-        # 3. Agreements for loan
-        res_agreements = await session.execute(
-            text("SELECT id, file_path, document_type, processing_status, upload_date FROM agreements WHERE loan_id = :lid"),
-            {"lid": l["id"]}
-        )
-        agreements = res_agreements.mappings().all()
+        # 3. Active Agreement(s) for this loan (scoped to loan)
+        ag = None
+        if l["agreement_id"]:
+            res_ag = await session.execute(
+                text("SELECT id, file_path, document_type, processing_status, upload_date FROM agreements WHERE id = :ag_id"),
+                {"ag_id": l["agreement_id"]}
+            )
+            ag = res_ag.mappings().first()
+        if not ag:
+            res_ag = await session.execute(
+                text("SELECT id, file_path, document_type, processing_status, upload_date FROM agreements WHERE loan_id = :lid ORDER BY upload_date DESC LIMIT 1"),
+                {"lid": l["id"]}
+            )
+            ag = res_ag.mappings().first()
 
-        ag_y = 100
-        for ag_idx, ag in enumerate(agreements[:3]):  # Limit top 3 agreements per loan
+        if ag:
             ag_node_id = f"ag_{ag['id']}"
-            file_name = ag["file_path"].split("/")[-1] if ag["file_path"] else "Agreement"
+            raw_path = ag["file_path"] or ""
+            base_name = raw_path.split("/")[-1] if raw_path else "Credit Agreement"
+            # Strip internal UUID prefix (e.g. 4b6faa07-221e-4847-883a-2018ea68cc0e_Apple SEC Filing.pdf)
+            clean_name = re.sub(r"^[0-9a-fA-F-]{36}_", "", base_name)
+            if clean_name.startswith("sec_filing_"):
+                clean_name = "SEC 10-K Filing"
+            if len(clean_name) > 22:
+                clean_name = clean_name[:20] + "…"
+
+            ag_y = l_y
             nodes.append({
                 "id": ag_node_id,
-                "label": file_name[:24],
+                "label": clean_name,
                 "type": "agreement",
-                "details": f"Document | Type: {ag['document_type']} | Status: {ag['processing_status']} | Uploaded: {ag['upload_date']}",
+                "details": f"Document: {clean_name} | Type: {ag['document_type'].upper()} | Status: {ag['processing_status']}",
                 "x": 480,
-                "y": ag_y + (ag_idx * 90)
+                "y": ag_y
             })
             edges.append({"from": l_node_id, "to": ag_node_id})
 
-            # 4. Covenants extracted from agreements / borrower
+            # 4. Deduplicated Covenants for this active agreement
             res_covs = await session.execute(
-                text("SELECT id, name, covenant_type, threshold, threshold_direction FROM covenants WHERE borrower_id = :b LIMIT 4"),
-                {"b": borrower_id}
+                text("""
+                    SELECT DISTINCT ON (name)
+                        id, name, covenant_type, threshold, threshold_direction, formula
+                    FROM covenants
+                    WHERE agreement_id = :ag_id
+                    ORDER BY name, extracted_at DESC
+                """),
+                {"ag_id": ag["id"]}
             )
             covs = res_covs.mappings().all()
 
-            cov_y = 80
             for c_idx, cov in enumerate(covs):
                 cov_node_id = f"cov_{cov['id']}"
-                if not any(n["id"] == cov_node_id for n in nodes):
-                    thresh_val = float(cov["threshold"]) if cov["threshold"] is not None else "N/A"
-                    nodes.append({
-                        "id": cov_node_id,
-                        "label": cov["name"][:22],
-                        "type": "covenant",
-                        "details": f"Covenant | Type: {cov['covenant_type']} | Threshold: {thresh_val} ({cov['threshold_direction'] or 'limit'})",
-                        "x": 680,
-                        "y": cov_y + (c_idx * 80)
-                    })
-                    edges.append({"from": ag_node_id, "to": cov_node_id})
+                thresh_val = float(cov["threshold"]) if cov["threshold"] is not None else "N/A"
+                dir_sym = "≤" if (cov["threshold_direction"] or "").lower() == "max" else ("≥" if (cov["threshold_direction"] or "").lower() == "min" else "")
+                cov_label = cov["name"].replace(" Maintenance", "")
+                if len(cov_label) > 22:
+                    cov_label = cov_label[:20] + "…"
 
-    # 5. Financial Metrics
+                cov_y = (ag_y - 40) + (c_idx * 80)
+                nodes.append({
+                    "id": cov_node_id,
+                    "label": cov_label,
+                    "type": "covenant",
+                    "details": f"Covenant: {cov['name']} | Type: {cov['covenant_type']} | Threshold: {dir_sym} {thresh_val} | Formula: {cov['formula'] or 'N/A'}",
+                    "x": 680,
+                    "y": cov_y
+                })
+                edges.append({"from": ag_node_id, "to": cov_node_id})
+
+    # 5. Financial Metrics (latest)
     res_fin = await session.execute(
         text("SELECT * FROM financial_metrics WHERE borrower_id = :b ORDER BY extracted_at DESC LIMIT 1"),
         {"b": borrower_id}
@@ -406,16 +469,14 @@ async def get_borrower_knowledge_graph(
     fin = res_fin.mappings().first()
     if fin:
         fin_node_id = f"fin_{fin['id']}"
-        lev_str = f"{fin['leverage_ratio']:.2f}x" if fin['leverage_ratio'] is not None else "N/A"
-        cov_str = f"{fin['interest_coverage']:.2f}x" if fin['interest_coverage'] is not None else "N/A"
-        # MEDIUM-3 (NEW-1): Null-safe display — None must not become $0.00 in graph tooltips.
-        # None = data unavailable; actual 0 still displays as $0.00.
-        rev_str = f"${float(fin['revenue']):,.2f}" if fin['revenue'] is not None else "N/A"
-        ebitda_str = f"${float(fin['ebitda']):,.2f}" if fin['ebitda'] is not None else "N/A"
-        debt_str = f"${float(fin['total_debt']):,.2f}" if fin['total_debt'] is not None else "N/A"
+        lev_str = f"{fin['leverage_ratio']:.2f}x" if fin["leverage_ratio"] is not None else "N/A"
+        cov_str = f"{fin['interest_coverage']:.2f}x" if fin["interest_coverage"] is not None else "N/A"
+        rev_str = f"${float(fin['revenue']):,.2f}" if fin["revenue"] is not None else "N/A"
+        ebitda_str = f"${float(fin['ebitda']):,.2f}" if fin["ebitda"] is not None else "N/A"
+        debt_str = f"${float(fin['total_debt']):,.2f}" if fin["total_debt"] is not None else "N/A"
         nodes.append({
             "id": fin_node_id,
-            "label": f"Financials ({fin['reporting_period'] or 'Latest'})",
+            "label": f"Financials ({fin['reporting_period'][:12] if fin['reporting_period'] else 'Latest'})",
             "type": "financial",
             "details": (
                 f"Financial Metrics | "
@@ -425,8 +486,8 @@ async def get_borrower_knowledge_graph(
                 f"Leverage: {lev_str} | "
                 f"Coverage: {cov_str}"
             ),
-            "x": 480,
-            "y": 320
+            "x": 280,
+            "y": 340
         })
         edges.append({"from": b["id"], "to": fin_node_id})
 

@@ -27,12 +27,39 @@ class CovenantMonitor:
         )
         fin = res_fin.mappings().first()
 
-        # 2. Fetch all covenants for borrower
+        # 2. Fetch active covenants for borrower (scoped to active loans only, deduplicated by latest extracted covenant per loan)
         res_cov = await session.execute(
-            text("SELECT * FROM covenants WHERE borrower_id = :b"),
+            text("""
+                SELECT DISTINCT ON (c.name, COALESCE(a.loan_id, 'none'))
+                    c.*, a.loan_id
+                FROM covenants c
+                LEFT JOIN agreements a ON c.agreement_id = a.id
+                LEFT JOIN loans l ON a.loan_id = l.id
+                JOIN borrowers b ON c.borrower_id = b.id
+                WHERE c.borrower_id = :b
+                  AND (l.is_archived IS NULL OR l.is_archived = FALSE)
+                  AND b.is_archived = FALSE
+                ORDER BY c.name, COALESCE(a.loan_id, 'none'), c.extracted_at DESC
+            """),
             {"b": borrower_id}
         )
         covenants = res_cov.mappings().all()
+
+        # Remove any orphan or archived monitoring records for this borrower
+        await session.execute(
+            text("""
+                DELETE FROM covenant_monitoring 
+                WHERE borrower_id = :b 
+                  AND covenant_id NOT IN (
+                      SELECT c.id FROM covenants c
+                      LEFT JOIN agreements a ON c.agreement_id = a.id
+                      LEFT JOIN loans l ON a.loan_id = l.id
+                      WHERE c.borrower_id = :b 
+                        AND (l.is_archived IS NULL OR l.is_archived = FALSE)
+                  )
+            """),
+            {"b": borrower_id}
+        )
 
         results = []
         now = datetime.now(timezone.utc)
@@ -44,18 +71,13 @@ class CovenantMonitor:
             threshold = float(cov["threshold"]) if cov["threshold"] is not None else None
             direction = (cov["threshold_direction"] or "max").lower()  # max or min
 
-            current_val = None
+            current_val: Optional[float] = None
             status = "healthy"
-            headroom_pct = 0.0
+            headroom_pct: Optional[float] = None
             reason = f"Covenant '{cov_name}' evaluated as healthy."
             confidence = 0.90
 
             if fin:
-                # MEDIUM-3 (ORIGINAL-MEDIUM-1): Use the covenants.formula field as the
-                # primary binding key if it is populated. Only fall back to keyword
-                # heuristics when formula is NULL (older covenants extracted without
-                # formula persistence).
-                # RULE: None (DB NULL) = unavailable ratio — do NOT fall back to 0.0.
                 formula_field = (cov.get("formula") or "").strip().lower() if hasattr(cov, "get") else ""
 
                 # Primary: formula-based exact mapping
@@ -81,7 +103,6 @@ class CovenantMonitor:
                         _raw = fin.get("dscr")
                         current_val = float(_raw) if _raw is not None else None
                     elif "debt" in name_lower:
-                        # total_debt is a balance-sheet item: None → 0.0 is acceptable.
                         current_val = float(fin.get("total_debt") or 0.0)
                     else:
                         _raw = fin.get("leverage_ratio")
@@ -90,6 +111,7 @@ class CovenantMonitor:
             if current_val is None and threshold is not None:
                 # Ratio is incalculable — mark as unknown, not healthy.
                 status = "unknown"
+                headroom_pct = None  # None = ratio unavailable, not 0.0% headroom
                 reason = (
                     f"Covenant '{cov_name}' could not be evaluated: "
                     f"the required financial ratio is unavailable (missing or incalculable). "
@@ -148,7 +170,7 @@ class CovenantMonitor:
                     "st": status,
                     "cur": current_val,
                     "thr": threshold,
-                    "hr": round(headroom_pct, 1),
+                    "hr": round(headroom_pct, 1) if headroom_pct is not None else None,
                     "rea": reason,
                     "conf": confidence,
                     "now": now,
@@ -163,7 +185,7 @@ class CovenantMonitor:
                 "status": status,
                 "current_value": current_val,
                 "threshold_value": threshold,
-                "headroom_pct": round(headroom_pct, 1),
+                "headroom_pct": round(headroom_pct, 1) if headroom_pct is not None else None,
                 "reason": reason,
                 "confidence_score": confidence
             })

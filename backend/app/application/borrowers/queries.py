@@ -13,3 +13,4 @@ class GetBorrowerQuery:
 @dataclass
 class ListBorrowersQuery:
     organization_id: Optional[str] = None
+    status: str = "ACTIVE"
