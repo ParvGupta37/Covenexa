@@ -57,6 +57,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
+      - name: Run Database Migrations
+        env:
+          DATABASE_URL: postgresql+asyncpg://covenexa_user:test_password@localhost:5432/covenexa_test
+        run: |
+          cd backend
+          alembic upgrade head
+
       - name: Run Backend Pytest Suite
         env:
           DATABASE_URL: postgresql+asyncpg://covenexa_user:test_password@localhost:5432/covenexa_test

@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
 
     # File Storage
-    UPLOAD_DIR: str = "/app/uploads"
+    UPLOAD_DIR: str = "uploads"
     UPLOAD_MAX_SIZE_MB: int = 50
     ALLOWED_UPLOAD_EXTENSIONS: str = "pdf,docx,xlsx,csv,txt"
 

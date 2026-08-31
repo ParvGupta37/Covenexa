@@ -137,48 +137,55 @@ class TestInternalErrorLeakage:
 class TestUploadPathTraversalProtection:
 
     @pytest.mark.asyncio
-    async def test_upload_handler_sanitizes_path_traversal_filenames(self):
+    async def test_upload_handler_sanitizes_path_traversal_filenames(self, tmp_path):
         """UploadDocumentHandler must sanitize command.file_name with os.path.basename
         preventing directory traversal outside UPLOAD_DIR."""
         import os
+        from app.core.config import settings
         from app.application.uploads.commands import UploadDocumentCommand
         from app.application.uploads.handlers import UploadDocumentHandler
 
-        mock_session = MagicMock()
-        mock_session.flush = AsyncMock()
-        mock_session.execute = AsyncMock()
-        mock_session.commit = AsyncMock()
-        mock_loan = MagicMock()
-        mock_loan.borrower_id = "borrower-1"
+        orig_upload_dir = settings.UPLOAD_DIR
+        settings.UPLOAD_DIR = str(tmp_path)
+        try:
+            mock_session = MagicMock()
+            mock_session.flush = AsyncMock()
+            mock_session.execute = AsyncMock()
+            mock_session.commit = AsyncMock()
+            mock_loan = MagicMock()
+            mock_loan.borrower_id = "borrower-1"
 
-        mock_loan_repo = MagicMock()
-        mock_loan_repo.get_by_id = AsyncMock(return_value=mock_loan)
+            mock_loan_repo = MagicMock()
+            mock_loan_repo.get_by_id = AsyncMock(return_value=mock_loan)
 
-        handler = UploadDocumentHandler(session=mock_session)
-        handler._loan_repo = mock_loan_repo
+            handler = UploadDocumentHandler(session=mock_session)
+            handler._loan_repo = mock_loan_repo
 
-        # Content mock
-        mock_content = MagicMock()
-        mock_content.read.return_value = b"sample pdf bytes"
+            # Content mock
+            mock_content = MagicMock()
+            mock_content.read.return_value = b"sample pdf bytes"
 
-        command = UploadDocumentCommand(
-            loan_id="loan-123",
-            file_name="../../../etc/passwd_malicious.pdf",
-            file_type="loan_agreement",
-            content=mock_content,
-            size_bytes=100,
-        )
+            command = UploadDocumentCommand(
+                loan_id="loan-123",
+                file_name="../../../etc/passwd_malicious.pdf",
+                file_type="loan_agreement",
+                content=mock_content,
+                size_bytes=100,
+            )
 
-        with patch("aiofiles.open", MagicMock()) as mock_aioopen:
-            mock_file_ctx = AsyncMock()
-            mock_aioopen.return_value.__aenter__.return_value = mock_file_ctx
+            with patch("aiofiles.open", MagicMock()) as mock_aioopen:
+                mock_file_ctx = AsyncMock()
+                mock_aioopen.return_value.__aenter__.return_value = mock_file_ctx
 
-            orm_result = await handler.handle(command)
+                orm_result = await handler.handle(command)
 
-            # Saved file path must NOT contain directory traversal ../
-            saved_path = orm_result.file_path
-            assert "../" not in saved_path, f"Path traversal character found in saved_path: {saved_path}"
-            assert saved_path.endswith("passwd_malicious.pdf")
+                # Saved file path must NOT contain directory traversal ../
+                saved_path = orm_result.file_path
+                assert "../" not in saved_path, f"Path traversal character found in saved_path: {saved_path}"
+                assert saved_path.endswith("passwd_malicious.pdf")
+                assert saved_path.startswith(str(tmp_path))
+        finally:
+            settings.UPLOAD_DIR = orig_upload_dir
 
 
 # ── 5. SEC DOWNLOADER SSRF PREVENTION ─────────────────────────────────

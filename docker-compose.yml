@@ -153,6 +153,7 @@ services:
       NEO4J_URI: bolt://neo4j:7687
       REDIS_URL: redis://:${REDIS_PASSWORD:-covenexa_redis_pass}@redis:6379/0
       MCP_SERVER_URL: http://mcp_server:8001
+      UPLOAD_DIR: /app/uploads
     volumes:
       - ./backend:/app
       - uploads_data:/app/uploads

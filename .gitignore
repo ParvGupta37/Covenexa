@@ -77,6 +77,7 @@ frontend/.vite/
 /reports/
 /backend/reports/
 /scratch/
+/backups/
 *.pdf
 *.docx
 *.xlsx

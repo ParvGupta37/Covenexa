@@ -8,47 +8,47 @@ The non-destructive **Archive + Restore** lifecycle has been implemented and ver
 ## 1. Files Changed
 
 ### Database & Migrations
-- **[`backend/alembic/versions/0008_add_archival_to_borrowers_and_loans.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/alembic/versions/0008_add_archival_to_borrowers_and_loans.py)**: Added `is_archived` (boolean, default FALSE), `archived_at` (timestamp with timezone), and `archived_by` (foreign key to `users.id`) with indexes to both `borrowers` and `loans` tables.
+- **[`backend/alembic/versions/0008_add_archival_to_borrowers_and_loans.py`](backend/alembic/versions/0008_add_archival_to_borrowers_and_loans.py)**: Added `is_archived` (boolean, default FALSE), `archived_at` (timestamp with timezone), and `archived_by` (foreign key to `users.id`) with indexes to both `borrowers` and `loans` tables.
 
 ### Domain Entities & ORM Models
-- **[`backend/app/domain/entities/borrower.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/domain/entities/borrower.py)**: Added `is_archived`, `archived_at`, `archived_by`, and domain methods `archive(user_id)` and `restore()`.
-- **[`backend/app/domain/entities/loan.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/domain/entities/loan.py)**: Added `is_archived`, `archived_at`, `archived_by`, and domain methods `archive(user_id)` and `restore()`.
-- **[`backend/app/infrastructure/orm/borrower_orm.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/infrastructure/orm/borrower_orm.py)**: Added ORM column mappings and entity converters.
-- **[`backend/app/infrastructure/orm/loan_orm.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/infrastructure/orm/loan_orm.py)**: Added ORM column mappings and entity converters.
-- **[`backend/app/core/schemas/borrower.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/core/schemas/borrower.py)**: Added `is_archived`, `archived_at`, and `archived_by` to response schema.
-- **[`backend/app/core/schemas/loan.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/core/schemas/loan.py)**: Added `is_archived`, `archived_at`, and `archived_by` to response schema.
+- **[`backend/app/domain/entities/borrower.py`](backend/app/domain/entities/borrower.py)**: Added `is_archived`, `archived_at`, `archived_by`, and domain methods `archive(user_id)` and `restore()`.
+- **[`backend/app/domain/entities/loan.py`](backend/app/domain/entities/loan.py)**: Added `is_archived`, `archived_at`, `archived_by`, and domain methods `archive(user_id)` and `restore()`.
+- **[`backend/app/infrastructure/orm/borrower_orm.py`](backend/app/infrastructure/orm/borrower_orm.py)**: Added ORM column mappings and entity converters.
+- **[`backend/app/infrastructure/orm/loan_orm.py`](backend/app/infrastructure/orm/loan_orm.py)**: Added ORM column mappings and entity converters.
+- **[`backend/app/core/schemas/borrower.py`](backend/app/core/schemas/borrower.py)**: Added `is_archived`, `archived_at`, and `archived_by` to response schema.
+- **[`backend/app/core/schemas/loan.py`](backend/app/core/schemas/loan.py)**: Added `is_archived`, `archived_at`, and `archived_by` to response schema.
 
 ### Application Commands, Queries & Handlers
-- **[`backend/app/application/borrowers/commands.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/application/borrowers/commands.py)**: Added `ArchiveBorrowerCommand` and `RestoreBorrowerCommand`.
-- **[`backend/app/application/borrowers/queries.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/application/borrowers/queries.py)**: Added `status: str = "ACTIVE"` filter.
-- **[`backend/app/application/borrowers/handlers.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/application/borrowers/handlers.py)**: Implemented `ArchiveBorrowerHandler` and `RestoreBorrowerHandler`.
-- **[`backend/app/application/loans/commands.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/application/loans/commands.py)**: Added `ArchiveLoanCommand` and `RestoreLoanCommand`.
-- **[`backend/app/application/loans/queries.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/application/loans/queries.py)**: Added `status: str = "ACTIVE"` and `organization_id` filters.
-- **[`backend/app/application/loans/handlers.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/application/loans/handlers.py)**: Implemented `ArchiveLoanHandler` and `RestoreLoanHandler`.
-- **[`backend/app/application/uploads/handlers.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/application/uploads/handlers.py)**: Added validation preventing document uploads to archived loan facilities.
+- **[`backend/app/application/borrowers/commands.py`](backend/app/application/borrowers/commands.py)**: Added `ArchiveBorrowerCommand` and `RestoreBorrowerCommand`.
+- **[`backend/app/application/borrowers/queries.py`](backend/app/application/borrowers/queries.py)**: Added `status: str = "ACTIVE"` filter.
+- **[`backend/app/application/borrowers/handlers.py`](backend/app/application/borrowers/handlers.py)**: Implemented `ArchiveBorrowerHandler` and `RestoreBorrowerHandler`.
+- **[`backend/app/application/loans/commands.py`](backend/app/application/loans/commands.py)**: Added `ArchiveLoanCommand` and `RestoreLoanCommand`.
+- **[`backend/app/application/loans/queries.py`](backend/app/application/loans/queries.py)**: Added `status: str = "ACTIVE"` and `organization_id` filters.
+- **[`backend/app/application/loans/handlers.py`](backend/app/application/loans/handlers.py)**: Implemented `ArchiveLoanHandler` and `RestoreLoanHandler`.
+- **[`backend/app/application/uploads/handlers.py`](backend/app/application/uploads/handlers.py)**: Added validation preventing document uploads to archived loan facilities.
 
 ### Repositories
-- **[`backend/app/infrastructure/repositories/borrower_repository_impl.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/infrastructure/repositories/borrower_repository_impl.py)**: Added status filtering (`ACTIVE`, `ARCHIVED`, `ALL`) and `archive()`/`restore()` operations.
-- **[`backend/app/infrastructure/repositories/loan_repository_impl.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/infrastructure/repositories/loan_repository_impl.py)**: Added status filtering (`ACTIVE`, `ARCHIVED`, `ALL`) and `archive()`/`restore()` operations.
+- **[`backend/app/infrastructure/repositories/borrower_repository_impl.py`](backend/app/infrastructure/repositories/borrower_repository_impl.py)**: Added status filtering (`ACTIVE`, `ARCHIVED`, `ALL`) and `archive()`/`restore()` operations.
+- **[`backend/app/infrastructure/repositories/loan_repository_impl.py`](backend/app/infrastructure/repositories/loan_repository_impl.py)**: Added status filtering (`ACTIVE`, `ARCHIVED`, `ALL`) and `archive()`/`restore()` operations.
 
 ### API Endpoints
-- **[`backend/app/api/v1/endpoints/borrowers.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/api/v1/endpoints/borrowers.py)**:
+- **[`backend/app/api/v1/endpoints/borrowers.py`](backend/app/api/v1/endpoints/borrowers.py)**:
   - `POST /borrowers/{id}/archive` (ADMIN only, audit log `borrower.archived`).
   - `POST /borrowers/{id}/restore` (ADMIN only, audit log `borrower.restored`).
   - `GET /borrowers/?status=ACTIVE|ARCHIVED|ALL` (default `ACTIVE`).
-- **[`backend/app/api/v1/endpoints/loans.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/api/v1/endpoints/loans.py)**:
+- **[`backend/app/api/v1/endpoints/loans.py`](backend/app/api/v1/endpoints/loans.py)**:
   - `POST /loans/{id}/archive` (ADMIN only, audit log `loan.archived`).
   - `POST /loans/{id}/restore` (ADMIN only, audit log `loan.restored`).
   - `GET /loans/?status=ACTIVE|ARCHIVED|ALL` (default `ACTIVE`).
   - `GET /loans/count?status=ACTIVE|ARCHIVED|ALL`.
-- **[`backend/app/api/v1/endpoints/risk.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/api/v1/endpoints/risk.py)**: Filtered archived entities from active portfolio summary, distribution, and graph representations.
-- **[`backend/app/api/v1/endpoints/alerts.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/api/v1/endpoints/alerts.py)**: Filtered alerts for active borrowers only.
-- **[`backend/app/api/v1/endpoints/organizations.py`](file:///Users/parvgupta/Desktop/Covenexa/backend/app/api/v1/endpoints/organizations.py)**: Filtered active counts for borrower and loan statistics.
+- **[`backend/app/api/v1/endpoints/risk.py`](backend/app/api/v1/endpoints/risk.py)**: Filtered archived entities from active portfolio summary, distribution, and graph representations.
+- **[`backend/app/api/v1/endpoints/alerts.py`](backend/app/api/v1/endpoints/alerts.py)**: Filtered alerts for active borrowers only.
+- **[`backend/app/api/v1/endpoints/organizations.py`](backend/app/api/v1/endpoints/organizations.py)**: Filtered active counts for borrower and loan statistics.
 
 ### Frontend
-- **[`frontend/src/types/index.ts`](file:///Users/parvgupta/Desktop/Covenexa/frontend/src/types/index.ts)**: Added `is_archived`, `archived_at`, and `archived_by` to `Borrower` and `Loan` types.
-- **[`frontend/src/pages/borrowers/BorrowersPage.tsx`](file:///Users/parvgupta/Desktop/Covenexa/frontend/src/pages/borrowers/BorrowersPage.tsx)**: Added status filter tabs `[Active] [Archived] [All]`, `ARCHIVED` status badge, Archive & Restore actions for `ADMIN`, and clear confirmation dialogs.
-- **[`frontend/src/pages/loans/LoansPage.tsx`](file:///Users/parvgupta/Desktop/Covenexa/frontend/src/pages/loans/LoansPage.tsx)**: Added status filter tabs `[Active] [Archived] [All]`, `ARCHIVED` status badge, Archive & Restore actions for `ADMIN`, and clear confirmation dialogs.
+- **[`frontend/src/types/index.ts`](frontend/src/types/index.ts)**: Added `is_archived`, `archived_at`, and `archived_by` to `Borrower` and `Loan` types.
+- **[`frontend/src/pages/borrowers/BorrowersPage.tsx`](frontend/src/pages/borrowers/BorrowersPage.tsx)**: Added status filter tabs `[Active] [Archived] [All]`, `ARCHIVED` status badge, Archive & Restore actions for `ADMIN`, and clear confirmation dialogs.
+- **[`frontend/src/pages/loans/LoansPage.tsx`](frontend/src/pages/loans/LoansPage.tsx)**: Added status filter tabs `[Active] [Archived] [All]`, `ARCHIVED` status badge, Archive & Restore actions for `ADMIN`, and clear confirmation dialogs.
 
 ---
 

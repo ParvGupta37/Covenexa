@@ -10,11 +10,15 @@ Covers:
   6. Legitimate distinct Acme records remain intact.
 """
 import sys
+from pathlib import Path
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-sys.path.insert(0, "/Users/parvgupta/Desktop/Covenexa")
-sys.path.insert(0, "/Users/parvgupta/Desktop/Covenexa/backend")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / "backend") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "backend"))
 
 from scripts.clean_acme_duplicates import run_cleanup
 

@@ -14,11 +14,15 @@ Covers:
   - covenant_agent: no hardcoded formula/threshold fallbacks
 """
 import sys
+from pathlib import Path
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-sys.path.insert(0, "/Users/parvgupta/Desktop/Covenexa")
-sys.path.insert(0, "/Users/parvgupta/Desktop/Covenexa/backend")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / "backend") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "backend"))
 
 
 # ─────────────────────────────────────────────────────────────
@@ -128,7 +132,7 @@ class TestTrendScore:
         assert trend < 80.0, f"Expected trend < 80 for deteriorated score, got {trend}"
 
     def test_trend_score_not_hardcoded_80_in_source(self):
-        with open("/Users/parvgupta/Desktop/Covenexa/ai/engines/health_score_engine.py") as f:
+        with open(REPO_ROOT / "ai/engines/health_score_engine.py") as f:
             content = f.read()
         assert "trend_score = 80.0" not in content
 
@@ -317,7 +321,7 @@ class TestGraphNodeNullRevenue:
         assert "$0.00" in details_zero
 
     def test_graph_endpoint_has_no_revenue_or_0_pattern(self):
-        with open("/Users/parvgupta/Desktop/Covenexa/backend/app/api/v1/endpoints/risk.py") as f:
+        with open(REPO_ROOT / "backend/app/api/v1/endpoints/risk.py") as f:
             content = f.read()
         assert "fin['revenue'] or 0" not in content
         assert "fin['ebitda'] or 0" not in content
@@ -339,7 +343,7 @@ class TestPortfolioNullWhenNoData:
         assert avg_score is None
 
     def test_portfolio_source_has_no_zero_fill(self):
-        with open("/Users/parvgupta/Desktop/Covenexa/backend/app/api/v1/endpoints/risk.py") as f:
+        with open(REPO_ROOT / "backend/app/api/v1/endpoints/risk.py") as f:
             content = f.read()
         assert "avg_score = 0.0" not in content
         assert "portfolio_risk_score = 0.0" not in content
@@ -371,12 +375,12 @@ class TestDeadORMExports:
 class TestGetLoanCleanup:
 
     def test_loan_query_details_helper_removed(self):
-        with open("/Users/parvgupta/Desktop/Covenexa/backend/app/api/v1/endpoints/loans.py") as f:
+        with open(REPO_ROOT / "backend/app/api/v1/endpoints/loans.py") as f:
             content = f.read()
         assert "async def loan_query_details" not in content
 
     def test_get_loan_still_calls_handler(self):
-        with open("/Users/parvgupta/Desktop/Covenexa/backend/app/api/v1/endpoints/loans.py") as f:
+        with open(REPO_ROOT / "backend/app/api/v1/endpoints/loans.py") as f:
             content = f.read()
         assert "handler.get_by_id(query)" in content
 
@@ -388,21 +392,21 @@ class TestGetLoanCleanup:
 class TestCompanyStoreSecurity:
 
     def test_hardcoded_org_uuid_removed(self):
-        with open("/Users/parvgupta/Desktop/Covenexa/frontend/src/store/company.store.ts") as f:
+        with open(REPO_ROOT / "frontend/src/store/company.store.ts") as f:
             content = f.read()
         assert "58b9ebce-3dc7-4168-af47-04a2354343f7" not in content
 
     def test_fake_agreement_id_removed(self):
-        with open("/Users/parvgupta/Desktop/Covenexa/frontend/src/store/company.store.ts") as f:
+        with open(REPO_ROOT / "frontend/src/store/company.store.ts") as f:
             content = f.read()
         assert "agreement_id: `agreement_" not in content
 
     def test_covenant_agent_no_hardcoded_formula_fallback(self):
-        with open("/Users/parvgupta/Desktop/Covenexa/ai/agents/covenant_agent.py") as f:
+        with open(REPO_ROOT / "ai/agents/covenant_agent.py") as f:
             content = f.read()
         assert '"Ratio Calculation"' not in content
 
     def test_covenant_agent_no_hardcoded_threshold_fallback(self):
-        with open("/Users/parvgupta/Desktop/Covenexa/ai/agents/covenant_agent.py") as f:
+        with open(REPO_ROOT / "ai/agents/covenant_agent.py") as f:
             content = f.read()
         assert '"threshold", 3.5' not in content
