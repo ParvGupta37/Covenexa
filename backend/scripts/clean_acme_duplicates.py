@@ -10,6 +10,7 @@ Identifies and cleans duplicate/stale scaffold records for Acme Tech Inc.:
 """
 import argparse
 import asyncio
+import os
 import sys
 from typing import List, Dict, Any
 
@@ -17,11 +18,16 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
-DB_URL = "postgresql+asyncpg://covenexa_user:covenexa_pass@localhost:5432/covenexa"
+DEFAULT_DB_URL = "postgresql+asyncpg://covenexa_user:covenexa_pass@localhost:5432/covenexa"
 
 
-async def run_cleanup(dry_run: bool = True) -> Dict[str, Any]:
-    engine = create_async_engine(DB_URL, echo=False)
+def get_db_url() -> str:
+    return os.getenv("DATABASE_URL", DEFAULT_DB_URL)
+
+
+async def run_cleanup(dry_run: bool = True, db_url: str | None = None) -> Dict[str, Any]:
+    url = db_url or get_db_url()
+    engine = create_async_engine(url, echo=False)
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with async_session() as session:
