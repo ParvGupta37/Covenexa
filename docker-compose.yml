@@ -141,8 +141,8 @@ services:
   # ── BACKEND ──────────────────────────────────────────────────
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
       target: development
     container_name: covenexa_backend
     restart: unless-stopped
@@ -155,7 +155,7 @@ services:
       MCP_SERVER_URL: http://mcp_server:8001
       UPLOAD_DIR: /app/uploads
     volumes:
-      - ./backend:/app
+      - .:/app
       - uploads_data:/app/uploads
     ports:
       - "${BACKEND_PORT:-8000}:8000"

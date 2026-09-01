@@ -122,7 +122,7 @@ jobs:
       - name: Validate Backend Docker Build
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
+          context: .
           file: ./backend/Dockerfile
           target: production
           push: false

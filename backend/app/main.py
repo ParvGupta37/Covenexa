@@ -29,12 +29,18 @@ async def lifespan(app: FastAPI):
     from event_bus.handlers.document_handler import DocumentUploadedHandler
 
     redis_client = RedisClient(url=settings.REDIS_URL)
-    await redis_client.initialize()
-    event_bus = RedisEventBus(redis_client)
-    await event_bus.start()
+    event_bus = None
+    try:
+        await redis_client.initialize()
+        event_bus = RedisEventBus(redis_client)
+        await event_bus.start()
 
-    handler = DocumentUploadedHandler()
-    await event_bus.subscribe("DocumentUploadedEvent", handler.handle)
+        handler = DocumentUploadedHandler()
+        await event_bus.subscribe("DocumentUploadedEvent", handler.handle)
+        logger.info("app.redis_event_bus_initialized")
+    except Exception as exc:
+        logger.warning("app.redis_init_failed", error=str(exc))
+
     app.state.event_bus = event_bus
     app.state.redis_client = redis_client
 
@@ -57,8 +63,16 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("app.shutdown")
-    await event_bus.stop()
-    await redis_client.close()
+    if event_bus is not None:
+        try:
+            await event_bus.stop()
+        except Exception as exc:
+            logger.warning("app.redis_event_bus_stop_failed", error=str(exc))
+    try:
+        await redis_client.close()
+    except Exception as exc:
+        logger.warning("app.redis_close_failed", error=str(exc))
+
     # Dispose Neo4j driver cleanly on shutdown.
     try:
         await neo4j_client.dispose()
