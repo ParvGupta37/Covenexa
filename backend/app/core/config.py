@@ -3,7 +3,7 @@ Backend application configurations and environment variable parser using Pydanti
 """
 import json
 from typing import List, Union
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +28,19 @@ class Settings(BaseSettings):
 
     # Databases
     DATABASE_URL: str = "postgresql+asyncpg://covenexa_user:covenexa_pass@localhost:5432/covenexa"
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def normalize_database_url(cls, v: str) -> str:
+        if not v:
+            return v
+        # Normalize Railway or standard Postgres URL schemes to asyncpg
+        if v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+        if v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
+
     NEO4J_URI: str = "bolt://neo4j:7687"
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = "covenexa_neo4j_pass"

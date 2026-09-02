@@ -17,12 +17,12 @@ from app.infrastructure.orm import *  # noqa
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
-config = context.config
-
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+try:
+    config = context.config
+    if config is not None and config.config_file_name is not None:
+        fileConfig(config.config_file_name)
+except Exception:
+    config = None
 
 # target_metadata is for autogenerate support
 target_metadata = Base.metadata
@@ -30,11 +30,21 @@ target_metadata = Base.metadata
 
 def get_db_url() -> str:
     """Return database connection URL from environment variables."""
-    # Use asyncpg for migrations
-    return os.getenv(
-        "DATABASE_URL",
-        "postgresql+asyncpg://covenexa_user:covenexa_pass@postgres:5432/covenexa"
-    )
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        if os.getenv("APP_ENV") == "production":
+            raise RuntimeError("DATABASE_URL is not set in production environment.")
+        return "postgresql+asyncpg://covenexa_user:covenexa_pass@localhost:5432/covenexa"
+
+    # Normalize Railway / standard PostgreSQL URL schemes:
+    # postgres://... -> postgresql+asyncpg://...
+    # postgresql://... -> postgresql+asyncpg://...
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgresql://") and not url.startswith("postgresql+asyncpg://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    return url
 
 
 def run_migrations_offline() -> None:
@@ -90,7 +100,8 @@ async def run_migrations_online() -> None:
     await connectable.dispose()
 
 
-if context.is_offline_mode():
-    run_migrations_offline()
-else:
-    asyncio.run(run_migrations_online())
+if config is not None:
+    if context.is_offline_mode():
+        run_migrations_offline()
+    else:
+        asyncio.run(run_migrations_online())
