@@ -51,9 +51,9 @@ class Settings(BaseSettings):
 
     # CORS – stored as a raw string, parsed via property below.
     # Acceptable formats in .env:
-    #   CORS_ORIGINS=http://localhost:3000,http://localhost:5173
-    #   CORS_ORIGINS=["http://localhost:3000","http://localhost:5173"]
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
+    #   CORS_ORIGINS=http://localhost:3000,http://localhost:5173,https://covenexa.vercel.app
+    #   CORS_ORIGINS=["http://localhost:3000","http://localhost:5173","https://covenexa.vercel.app"]
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173,https://covenexa.vercel.app"
 
     # File Storage
     UPLOAD_DIR: str = "uploads"
@@ -77,12 +77,21 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> List[str]:
         """Parse CORS_ORIGINS string into a list (supports JSON array or CSV)."""
         raw = self.CORS_ORIGINS.strip()
+        origins: List[str] = []
         if raw.startswith("["):
             try:
-                return [str(o).rstrip("/") for o in json.loads(raw) if o]
+                origins = [str(o).rstrip("/") for o in json.loads(raw) if o]
             except Exception:
                 pass
-        return [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
+        else:
+            origins = [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
+
+        # Ensure official production Vercel frontend is always permitted
+        prod_vercel = "https://covenexa.vercel.app"
+        if prod_vercel not in origins:
+            origins.append(prod_vercel)
+
+        return origins
 
     @property
     def allowed_extensions_list(self) -> List[str]:
