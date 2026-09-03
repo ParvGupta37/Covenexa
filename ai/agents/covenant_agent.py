@@ -214,27 +214,6 @@ class CovenantAgent(BaseAgent):
                 "raw_text": cov_match.group(0)
             })
 
-        # General credit facility maintenance covenant fallback if filing contains debt notes
-        if not found and ("credit facility" in text.lower() or "term loan" in text.lower() or "notes" in text.lower()):
-            found.append({
-                "name": "Maximum Leverage Ratio Maintenance",
-                "covenant_type": "maintenance",
-                "formula": "Total Debt / EBITDA",
-                "threshold": 4.0,
-                "threshold_direction": "max",
-                "frequency": "quarterly",
-                "raw_text": "Borrower shall maintain a Maximum Leverage Ratio not to exceed 4.00 to 1.00."
-            })
-            found.append({
-                "name": "Minimum Interest Coverage Maintenance",
-                "covenant_type": "maintenance",
-                "formula": "EBITDA / Interest Expense",
-                "threshold": 2.5,
-                "threshold_direction": "min",
-                "frequency": "quarterly",
-                "raw_text": "Borrower shall maintain a Minimum Interest Coverage Ratio of at least 2.50 to 1.00."
-            })
-
         return found
 
     def _parse_json_response(self, text: str) -> Dict[str, Any]:
