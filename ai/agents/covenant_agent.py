@@ -16,7 +16,9 @@ logger = structlog.get_logger(__name__)
 
 COVENANT_KEYWORDS = [
     "covenant", "ratio", "threshold", "minimum", "maximum",
-    "debt", "leverage", "coverage", "net worth", "ebitda", "indebtedness"
+    "debt", "leverage", "coverage", "net worth", "ebitda", "indebtedness",
+    "capitalization", "tangible net worth", "fixed charge", "liquidity",
+    "negative covenant", "affirmative covenant", "financial covenant"
 ]
 
 
@@ -45,13 +47,17 @@ class CovenantAgent(BaseAgent):
         # 1. Update status
         await self._update_agreement_status(agreement_id, "extracting")
 
-        # 2. Filter paragraphs
-        paragraphs = parsed_text.split("\n\n")
+        # 2. Filter paragraphs & covenant sections (handles both \n\n and \n text formats)
+        raw_paragraphs = [p.strip() for p in re.split(r"\n\s*\n|\r\n\s*\r\n", parsed_text) if p.strip()]
+        if len(raw_paragraphs) <= 3 and parsed_text:
+            lines = [l.strip() for l in parsed_text.splitlines() if l.strip()]
+            raw_paragraphs = ["\n".join(lines[i:i+8]) for i in range(0, len(lines), 5)]
+
         relevant_paragraphs = [
-            p for p in paragraphs 
+            p for p in raw_paragraphs 
             if any(kw in p.lower() for kw in COVENANT_KEYWORDS)
         ]
-        context_text = "\n\n".join(relevant_paragraphs if relevant_paragraphs else paragraphs)[:15000]
+        context_text = "\n\n".join(relevant_paragraphs if relevant_paragraphs else raw_paragraphs)[:25000]
 
         covenants_list: List[Dict[str, Any]] = []
 
@@ -100,53 +106,46 @@ class CovenantAgent(BaseAgent):
                 params={
                     "query": """
                         INSERT INTO covenants (
-                            id, agreement_id, borrower_id, name, covenant_type, formula,
+                            id, agreement_id, name, covenant_type, formula,
                             threshold, threshold_direction, frequency, cure_period_days,
-                            is_event_of_default, amendment_references, raw_text, extracted_at
+                            is_event_of_default, raw_text, extracted_at
                         ) VALUES (
-                            :id, :agreement_id, :borrower_id, :name, :covenant_type, :formula,
+                            :id, :agreement_id, :name, :covenant_type, :formula,
                             :threshold, :threshold_direction, :frequency, :cure_period_days,
-                            :is_event_of_default, :amendment_references, :raw_text, NOW()
+                            :is_event_of_default, :raw_text, NOW()
                         )
                     """,
                     "params": {
                         "id": cov_id,
                         "agreement_id": agreement_id,
-                        "borrower_id": borrower_id,
                         "name": cov.get("name", "Financial Covenant"),
                         "covenant_type": cov.get("covenant_type", "maintenance"),
-                        # MEDIUM-3 (ORIGINAL-MEDIUM-1): Use formula from source document.
-                        # Never fabricate a formula string when the document does not provide one.
-                        # None = formula not specified in source.
-                        "formula": cov.get("formula") or None,
-                        # Never fall back to a hardcoded threshold — if source did not specify
-                        # a threshold, None is stored and covenant evaluation marks it "unknown".
+                        "formula": cov.get("formula"),
                         "threshold": cov.get("threshold"),
                         "threshold_direction": cov.get("threshold_direction", "max"),
                         "frequency": cov.get("frequency", "quarterly"),
                         "cure_period_days": cov.get("cure_period_days", 30),
-                        "is_event_of_default": cov.get("is_event_of_default", True),
-                        "amendment_references": cov.get("amendment_references"),
-                        "raw_text": cov.get("raw_text"),
+                        "is_event_of_default": cov.get("is_event_of_default", False),
+                        "raw_text": cov.get("raw_text", ""),
                     }
                 }
             )
 
-            # Neo4j Graph insertion via MCP Neo4j Tool
+            # Knowledge Graph node & relations
             try:
                 await self._mcp.execute_tool(
                     tool_name="neo4j",
                     operation="upsert_node",
                     params={
+                        "node_id": cov_id,
                         "label": "Covenant",
                         "properties": {
-                            "id": cov_id,
                             "name": cov.get("name"),
                             "covenant_type": cov.get("covenant_type"),
-                            "formula": cov.get("formula", ""),
-                            "threshold": cov.get("threshold", 0.0),
-                        },
-                        "match_key": "id"
+                            "threshold": cov.get("threshold"),
+                            "threshold_direction": cov.get("threshold_direction"),
+                            "frequency": cov.get("frequency"),
+                        }
                     }
                 )
                 await self._mcp.execute_tool(
@@ -183,10 +182,10 @@ class CovenantAgent(BaseAgent):
         return state
 
     def _pattern_extract_covenants(self, text: str) -> List[Dict[str, Any]]:
-        """Legal covenant pattern extraction."""
+        """Legal covenant pattern extraction with explicit threshold matching."""
         found: List[Dict[str, Any]] = []
 
-        # Leverage covenant pattern
+        # 1. Leverage covenant pattern
         lev_match = re.search(r"(?:leverage ratio|consolidated leverage|debt to ebitda)[^\d]*(\d+\.?\d*)\s*:?\s*1\.?0?", text, re.IGNORECASE)
         if lev_match:
             thresh = float(lev_match.group(1))
@@ -200,7 +199,7 @@ class CovenantAgent(BaseAgent):
                 "raw_text": lev_match.group(0)
             })
 
-        # Coverage covenant pattern
+        # 2. Coverage covenant pattern
         cov_match = re.search(r"(?:interest coverage|fixed charge coverage|dscr)[^\d]*(\d+\.?\d*)\s*:?\s*1\.?0?", text, re.IGNORECASE)
         if cov_match:
             thresh = float(cov_match.group(1))
@@ -212,6 +211,42 @@ class CovenantAgent(BaseAgent):
                 "threshold_direction": "min",
                 "frequency": "quarterly",
                 "raw_text": cov_match.group(0)
+            })
+
+        # 3. Debt to Capitalization covenant pattern
+        cap_match = re.search(r"(?:debt to capitalization|debt to total capitalization|capitalization ratio)[^\d]*(\d+\.?\d*)\s*(?::\s*1\.?0?|%|\s)", text, re.IGNORECASE)
+        if cap_match:
+            thresh = float(cap_match.group(1))
+            found.append({
+                "name": "Debt to Capitalization Ratio",
+                "covenant_type": "maintenance",
+                "formula": "Total Debt / Total Capitalization",
+                "threshold": thresh,
+                "threshold_direction": "max",
+                "frequency": "quarterly",
+                "raw_text": cap_match.group(0)
+            })
+
+        # 4. Tangible Net Worth covenant pattern
+        tnw_match = re.search(r"(?:tangible net worth|minimum net worth|consolidated net worth)[^\d$]*\$?\s*([0-9,]+(?:\.[0-9]+)?)\s*(million|billion|k)?", text, re.IGNORECASE)
+        if tnw_match:
+            raw_num_str = tnw_match.group(1).replace(",", "")
+            raw_num = float(raw_num_str) if raw_num_str else 0.0
+            unit = (tnw_match.group(2) or "").lower()
+            if unit == "billion":
+                raw_num *= 1e9
+            elif unit == "million":
+                raw_num *= 1e6
+            elif unit == "k":
+                raw_num *= 1e3
+            found.append({
+                "name": "Tangible Net Worth",
+                "covenant_type": "maintenance",
+                "formula": "Total Assets - Intangibles - Total Liabilities",
+                "threshold": raw_num,
+                "threshold_direction": "min",
+                "frequency": "quarterly",
+                "raw_text": tnw_match.group(0)
             })
 
         return found

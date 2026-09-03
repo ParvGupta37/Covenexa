@@ -392,18 +392,22 @@ async def get_borrower_knowledge_graph(
         })
         edges.append({"from": b["id"], "to": l_node_id})
 
-        # 3. Active Agreement(s) for this loan (scoped to loan)
-        ag = None
-        if l["agreement_id"]:
+        # 3. Active Agreement(s) for this loan (prioritize latest uploaded agreement)
+        res_ag = await session.execute(
+            text("""
+                SELECT id, file_path, document_type, filing_type, processing_status, upload_date 
+                FROM agreements 
+                WHERE loan_id = :lid 
+                ORDER BY upload_date DESC 
+                LIMIT 1
+            """),
+            {"lid": l["id"]}
+        )
+        ag = res_ag.mappings().first()
+        if not ag and l.get("agreement_id"):
             res_ag = await session.execute(
-                text("SELECT id, file_path, document_type, processing_status, upload_date FROM agreements WHERE id = :ag_id"),
+                text("SELECT id, file_path, document_type, filing_type, processing_status, upload_date FROM agreements WHERE id = :ag_id"),
                 {"ag_id": l["agreement_id"]}
-            )
-            ag = res_ag.mappings().first()
-        if not ag:
-            res_ag = await session.execute(
-                text("SELECT id, file_path, document_type, processing_status, upload_date FROM agreements WHERE loan_id = :lid ORDER BY upload_date DESC LIMIT 1"),
-                {"lid": l["id"]}
             )
             ag = res_ag.mappings().first()
 
@@ -411,10 +415,10 @@ async def get_borrower_knowledge_graph(
             ag_node_id = f"ag_{ag['id']}"
             raw_path = ag["file_path"] or ""
             base_name = raw_path.split("/")[-1] if raw_path else "Credit Agreement"
-            # Strip internal UUID prefix (e.g. 4b6faa07-221e-4847-883a-2018ea68cc0e_Apple SEC Filing.pdf)
             clean_name = re.sub(r"^[0-9a-fA-F-]{36}_", "", base_name)
             if clean_name.startswith("sec_filing_"):
-                clean_name = "SEC 10-K Filing"
+                doc_type_clean = (ag.get("filing_type") or ag.get("document_type") or "SEC Filing").replace("_", " ").upper()
+                clean_name = f"SEC {doc_type_clean}" if not doc_type_clean.startswith("SEC") else doc_type_clean
             if len(clean_name) > 22:
                 clean_name = clean_name[:20] + "…"
 
@@ -461,12 +465,26 @@ async def get_borrower_knowledge_graph(
                 })
                 edges.append({"from": ag_node_id, "to": cov_node_id})
 
-    # 5. Financial Metrics (latest)
+    # 5. Financial Metrics (latest for this borrower or attached agreements)
     res_fin = await session.execute(
-        text("SELECT * FROM financial_metrics WHERE borrower_id = :b ORDER BY extracted_at DESC LIMIT 1"),
+        text("""
+            SELECT fm.* 
+            FROM financial_metrics fm
+            JOIN agreements a ON fm.agreement_id = a.id
+            JOIN loans l ON a.loan_id = l.id
+            WHERE l.borrower_id = :b
+            ORDER BY fm.extracted_at DESC 
+            LIMIT 1
+        """),
         {"b": borrower_id}
     )
     fin = res_fin.mappings().first()
+    if not fin:
+        res_fin = await session.execute(
+            text("SELECT * FROM financial_metrics WHERE borrower_id = :b ORDER BY extracted_at DESC LIMIT 1"),
+            {"b": borrower_id}
+        )
+        fin = res_fin.mappings().first()
     if fin:
         fin_node_id = f"fin_{fin['id']}"
         lev_str = f"{fin['leverage_ratio']:.2f}x" if fin["leverage_ratio"] is not None else "N/A"

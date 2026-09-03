@@ -60,12 +60,27 @@ async def generate_credit_memo(
         except:
             default_dict["risk_factors"] = []
 
-    # 3. Fetch Financial Metrics
+    # 3. Fetch Financial Metrics (check both linked agreements and direct borrower_id)
     res_f = await session.execute(
-        text("SELECT revenue, ebitda, net_income, total_debt, cash, leverage_ratio, interest_coverage, currency FROM financial_metrics WHERE borrower_id = :id ORDER BY extracted_at DESC LIMIT 1"),
+        text("""
+            SELECT fm.revenue, fm.ebitda, fm.net_income, fm.total_debt, fm.cash, fm.leverage_ratio, fm.interest_coverage, fm.currency 
+            FROM financial_metrics fm
+            JOIN agreements a ON fm.agreement_id = a.id
+            JOIN loans l ON a.loan_id = l.id
+            WHERE l.borrower_id = :id
+            ORDER BY fm.extracted_at DESC 
+            LIMIT 1
+        """),
         {"id": borrower_id},
     )
     f_row = res_f.mappings().first()
+    if not f_row:
+        res_f = await session.execute(
+            text("SELECT revenue, ebitda, net_income, total_debt, cash, leverage_ratio, interest_coverage, currency FROM financial_metrics WHERE borrower_id = :id ORDER BY extracted_at DESC LIMIT 1"),
+            {"id": borrower_id},
+        )
+        f_row = res_f.mappings().first()
+
     fin_dict = {k: (float(v) if v is not None and k != "currency" else v) for k, v in dict(f_row).items()} if f_row else {}
 
     # 4. Fetch Covenant Monitoring
@@ -82,13 +97,23 @@ async def generate_credit_memo(
     c_rows = res_c.mappings().all()
     covenants_list = [{k: (float(v) if isinstance(v, (int, float)) else v) for k, v in dict(r).items()} for r in c_rows]
 
-    # 5. Fetch Facilities / Loans
+    # 5. Fetch Facilities / Loans (active only)
     res_l = await session.execute(
-        text("SELECT id, loan_type, interest_rate, maturity_date FROM loans WHERE borrower_id = :id"),
+        text("SELECT id, loan_type, principal_amount, currency, interest_rate, maturity_date, status FROM loans WHERE borrower_id = :id AND is_archived = FALSE"),
         {"id": borrower_id},
     )
     l_rows = res_l.mappings().all()
-    loans_list = [dict(r) for r in l_rows]
+    loans_list = []
+    for r in l_rows:
+        loans_list.append({
+            "id": r["id"],
+            "loan_type": r.get("loan_type") or "Term Loan",
+            "principal_amount": float(r["principal_amount"]) if r.get("principal_amount") is not None else None,
+            "currency": r.get("currency") or "USD",
+            "interest_rate": float(r["interest_rate"]) if r.get("interest_rate") is not None else None,
+            "maturity_date": r["maturity_date"].isoformat() if hasattr(r.get("maturity_date"), "isoformat") else (str(r.get("maturity_date")) if r.get("maturity_date") else None),
+            "status": r.get("status") or "active",
+        })
 
     # 6. Fetch Latest Stress Simulation if available
     res_s = await session.execute(
@@ -110,14 +135,18 @@ async def generate_credit_memo(
         stress=stress_dict,
     )
 
-    # 8. Log Audit event
-    await log_audit_event(
-        action="credit_memo_generated",
-        resource_type="report",
-        resource_id=borrower_id,
-        user_id=current_user.id,
-        user_email=current_user.email,
-        details={"company_name": borrower_dict.get("company_name")},
-    )
+    # 8. Log Audit event safely (non-blocking)
+    try:
+        await log_audit_event(
+            action="credit_memo_generated",
+            resource_type="report",
+            resource_id=borrower_id,
+            user_id=current_user.id,
+            user_email=current_user.email,
+            details={"company_name": borrower_dict.get("company_name")},
+        )
+    except Exception as audit_err:
+        import structlog
+        structlog.get_logger(__name__).warning("reports.audit_log_failed", error=str(audit_err))
 
     return memo

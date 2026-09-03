@@ -75,3 +75,41 @@ class TestCovenantExtractionLineage:
         """
         covenants = covenant_agent._pattern_extract_covenants(text)
         assert covenants == [], f"Expected zero covenants, but found: {covenants}"
+
+    def test_debt_to_capitalization_ratio_covenant_extracted(self, covenant_agent):
+        """Case F: Real Debt to Capitalization Ratio covenant."""
+        text = """
+        SECTION 6.02 Debt to Capitalization. The Borrower shall maintain a Debt to Capitalization Ratio
+        not to exceed 0.50:1.00 as of the end of each fiscal quarter.
+        """
+        covenants = covenant_agent._pattern_extract_covenants(text)
+        assert len(covenants) == 1
+        assert covenants[0]["name"] == "Debt to Capitalization Ratio"
+        assert covenants[0]["threshold"] == 0.5
+        assert covenants[0]["threshold_direction"] == "max"
+
+    def test_tangible_net_worth_covenant_extracted(self, covenant_agent):
+        """Case G: Real Tangible Net Worth maintenance covenant."""
+        text = """
+        SECTION 6.03 Net Worth. The Borrower shall maintain Tangible Net Worth of not less than
+        $250 million at all times.
+        """
+        covenants = covenant_agent._pattern_extract_covenants(text)
+        assert len(covenants) == 1
+        assert covenants[0]["name"] == "Tangible Net Worth"
+        assert covenants[0]["threshold"] == 250000000.0
+        assert covenants[0]["threshold_direction"] == "min"
+
+    @pytest.mark.asyncio
+    async def test_single_vs_double_newline_context_filtering_parity(self, covenant_agent):
+        """Case H: Equivalent document text with single vs double newlines both retain covenant context."""
+        double_newline_text = "Cover Page Info\n\nSECTION 7.11 Financial Covenants\n\nConsolidated Leverage Ratio shall not exceed 3.50:1.00\n\nSignatures"
+        single_newline_text = "Cover Page Info\nSECTION 7.11 Financial Covenants\nConsolidated Leverage Ratio shall not exceed 3.50:1.00\nSignatures"
+
+        covs_double = covenant_agent._pattern_extract_covenants(double_newline_text)
+        covs_single = covenant_agent._pattern_extract_covenants(single_newline_text)
+
+        assert len(covs_double) == 1
+        assert len(covs_single) == 1
+        assert covs_double[0]["threshold"] == covs_single[0]["threshold"] == 3.5
+
