@@ -2,6 +2,7 @@
 Covenexa FastAPI Backend Application.
 Core entry point configures lifespan hook, middlewares, and routers.
 """
+import asyncio
 from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI, Request
@@ -65,11 +66,13 @@ async def lifespan(app: FastAPI):
         neo4j_client.initialize()
         logger.info("app.neo4j_driver_initialized")
         try:
-            is_connected = await neo4j_client.verify_connectivity()
+            is_connected = await asyncio.wait_for(neo4j_client.verify_connectivity(), timeout=5.0)
             if is_connected:
                 logger.info("app.neo4j_connectivity_verified")
             else:
                 logger.warning("app.neo4j_connectivity_failed")
+        except asyncio.TimeoutError:
+            logger.warning("app.neo4j_connectivity_timeout", timeout_seconds=5)
         except Exception as exc:
             logger.warning("app.neo4j_connectivity_check_failed", error=str(exc))
     except Exception as exc:
