@@ -27,6 +27,7 @@ numpy>=1.26.0
 # Document Parsing & SEC Extraction
 pypdf>=4.2.0
 beautifulsoup4>=4.12.0
+lxml>=5.2.0
 requests>=2.31.0
 
 # Security & Auth

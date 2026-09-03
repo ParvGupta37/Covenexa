@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 import structlog
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, FeatureNotFound
 
 logger = structlog.get_logger(__name__)
 
@@ -38,7 +38,10 @@ class SECHTMLParser:
         return "\n\n".join(text_chunks)
 
     def parse_html(self, html_content: str) -> str:
-        soup = BeautifulSoup(html_content, "lxml")
+        try:
+            soup = BeautifulSoup(html_content, "lxml")
+        except FeatureNotFound:
+            soup = BeautifulSoup(html_content, "html.parser")
 
         # Remove irrelevant elements
         for element in soup(["script", "style", "nav", "footer", "head", "noscript", "svg"]):

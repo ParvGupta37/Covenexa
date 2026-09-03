@@ -280,3 +280,34 @@ class TestSECHTMLFinancialExtraction:
         norm = FinancialExtractionNormalizer.normalize(extracted, context_text=ctx)
         assert norm["revenue"] == 100233000.0
         assert norm["net_income"] == 15253000.0
+
+    def test_11_sec_html_parser_normal_lxml(self):
+        """TEST 11: SECHTMLParser successfully parses HTML with lxml."""
+        from integrations.sec.html_parser import SECHTMLParser
+        parser = SECHTMLParser()
+        html = "<html><body><h1>Item 1.01</h1><p>Credit Agreement terms.</p></body></html>"
+        text = parser.parse_html(html)
+        assert "Item 1.01" in text
+        assert "Credit Agreement terms." in text
+
+    def test_12_sec_html_parser_fallback_on_feature_not_found(self):
+        """TEST 12: SECHTMLParser gracefully falls back to html.parser when FeatureNotFound is raised."""
+        from unittest.mock import patch
+        from bs4 import BeautifulSoup, FeatureNotFound
+        from integrations.sec.html_parser import SECHTMLParser
+
+        parser = SECHTMLParser()
+        html = "<html><body><h1>SEC 8-K Disclosure</h1><p>Filing details.</p></body></html>"
+
+        orig_init = BeautifulSoup.__init__
+
+        def mock_init(self, markup="", features=None, **kwargs):
+            if features == "lxml":
+                raise FeatureNotFound("Couldn't find tree builder: lxml")
+            return orig_init(self, markup, features=features, **kwargs)
+
+        with patch.object(BeautifulSoup, "__init__", side_effect=mock_init, autospec=True):
+            text = parser.parse_html(html)
+            assert "SEC 8-K Disclosure" in text
+            assert "Filing details." in text
+
