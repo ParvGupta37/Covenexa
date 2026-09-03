@@ -23,7 +23,15 @@ async def lifespan(app: FastAPI):
     """Lifecycle startup and teardown triggers."""
     logger.info("app.startup", environment=settings.APP_ENV, version=settings.APP_VERSION)
 
-    # Start Redis Event Bus listener for DocumentUploadedEvent
+    # 1. Run database migrations before serving any requests
+    from app.core.migrations import run_startup_migrations
+    try:
+        await run_startup_migrations()
+    except Exception as exc:
+        logger.error("app.startup_migration_aborted", error=str(exc))
+        raise
+
+    # 2. Start Redis Event Bus listener for DocumentUploadedEvent
     from integrations.redis.client import RedisClient
     from event_bus.redis_event_bus import RedisEventBus
     from event_bus.handlers.document_handler import DocumentUploadedHandler
