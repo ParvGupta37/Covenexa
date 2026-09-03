@@ -108,15 +108,12 @@ export function RegisterPage() {
           password,
         });
 
-        // Store auth tokens and user
-        localStorage.setItem("access_token", res.data.access_token);
-        localStorage.setItem("refresh_token", res.data.refresh_token);
-        useAuthStore.setState({
-          user: res.data.user,
-          token: res.data.access_token,
-          refreshToken: res.data.refresh_token,
-          isAuthenticated: true,
-        });
+        // Store auth tokens and user via central login action
+        useAuthStore.getState().login(
+          res.data.user,
+          res.data.access_token,
+          res.data.refresh_token
+        );
 
         navigate("/app", { replace: true });
       } else {
@@ -135,15 +132,12 @@ export function RegisterPage() {
           organization_industry: orgIndustry,
         });
 
-        // Log user straight in
-        localStorage.setItem("access_token", res.data.access_token);
-        localStorage.setItem("refresh_token", res.data.refresh_token);
-        useAuthStore.setState({
-          user: res.data.user,
-          token: res.data.access_token,
-          refreshToken: res.data.refresh_token,
-          isAuthenticated: true,
-        });
+        // Log user straight in via central login action
+        useAuthStore.getState().login(
+          res.data.user,
+          res.data.access_token,
+          res.data.refresh_token
+        );
 
         navigate("/app", { replace: true });
       }
