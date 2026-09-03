@@ -64,6 +64,14 @@ async def lifespan(app: FastAPI):
     try:
         neo4j_client.initialize()
         logger.info("app.neo4j_driver_initialized")
+        try:
+            is_connected = await neo4j_client.verify_connectivity()
+            if is_connected:
+                logger.info("app.neo4j_connectivity_verified")
+            else:
+                logger.warning("app.neo4j_connectivity_failed")
+        except Exception as exc:
+            logger.warning("app.neo4j_connectivity_check_failed", error=str(exc))
     except Exception as exc:
         logger.warning("app.neo4j_driver_init_failed", error=str(exc))
     app.state.neo4j_client = neo4j_client
