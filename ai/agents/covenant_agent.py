@@ -18,7 +18,8 @@ COVENANT_KEYWORDS = [
     "covenant", "ratio", "threshold", "minimum", "maximum",
     "debt", "leverage", "coverage", "net worth", "ebitda", "indebtedness",
     "capitalization", "tangible net worth", "fixed charge", "liquidity",
-    "negative covenant", "affirmative covenant", "financial covenant"
+    "negative covenant", "affirmative covenant", "financial covenant",
+    "reporting requirement"
 ]
 
 
@@ -106,11 +107,11 @@ class CovenantAgent(BaseAgent):
                 params={
                     "query": """
                         INSERT INTO covenants (
-                            id, agreement_id, name, covenant_type, formula,
+                            id, agreement_id, borrower_id, name, covenant_type, formula,
                             threshold, threshold_direction, frequency, cure_period_days,
                             is_event_of_default, raw_text, extracted_at
                         ) VALUES (
-                            :id, :agreement_id, :name, :covenant_type, :formula,
+                            :id, :agreement_id, :borrower_id, :name, :covenant_type, :formula,
                             :threshold, :threshold_direction, :frequency, :cure_period_days,
                             :is_event_of_default, :raw_text, NOW()
                         )
@@ -118,11 +119,12 @@ class CovenantAgent(BaseAgent):
                     "params": {
                         "id": cov_id,
                         "agreement_id": agreement_id,
+                        "borrower_id": borrower_id,
                         "name": cov.get("name", "Financial Covenant"),
                         "covenant_type": cov.get("covenant_type", "maintenance"),
                         "formula": cov.get("formula"),
                         "threshold": cov.get("threshold"),
-                        "threshold_direction": cov.get("threshold_direction", "max"),
+                        "threshold_direction": cov.get("threshold_direction"),
                         "frequency": cov.get("frequency", "quarterly"),
                         "cure_period_days": cov.get("cure_period_days", 30),
                         "is_event_of_default": cov.get("is_event_of_default", False),
@@ -182,54 +184,231 @@ class CovenantAgent(BaseAgent):
         return state
 
     def _pattern_extract_covenants(self, text: str) -> List[Dict[str, Any]]:
-        """Legal covenant pattern extraction with explicit threshold matching."""
+        """
+        Legal covenant pattern extraction.
+        Extracts genuine covenants with disclosed numerical thresholds or explicitly defined
+        covenant clauses without disclosed numerical thresholds (setting threshold=None).
+        Never fabricates covenants or thresholds for generic loan/note mentions.
+        """
         found: List[Dict[str, Any]] = []
+        covenant_names_seen = set()
 
-        # 1. Leverage covenant pattern
-        lev_match = re.search(r"(?:leverage ratio|consolidated leverage|debt to ebitda)[^\d]*(\d+\.?\d*)\s*:?\s*1\.?0?", text, re.IGNORECASE)
-        if lev_match:
+        def _add_covenant(cov: Dict[str, Any]):
+            name = cov.get("name")
+            if name and name not in covenant_names_seen:
+                covenant_names_seen.add(name)
+                found.append(cov)
+
+        # 1. Maximum Consolidated Senior Secured Leverage Ratio
+        # 1a. Numeric match (must be followed by ratio notation :1, x, times)
+        sr_sec_lev_num = re.search(
+            r"(?:consolidated\s+senior\s+secured\s+leverage|senior\s+secured\s+leverage)[^\d]{1,150}?(\d+(?:\.\d+)?)\s*(?::\s*1(?:\.0+)?|\s*to\s*1(?:\.0+)?|\s*x\b|\s*times\b)",
+            text,
+            re.IGNORECASE
+        )
+        if sr_sec_lev_num:
+            thresh = float(sr_sec_lev_num.group(1))
+            _add_covenant({
+                "name": "Maximum Consolidated Senior Secured Leverage Ratio",
+                "covenant_type": "maintenance",
+                "formula": "Consolidated Senior Secured Debt / EBITDA",
+                "threshold": thresh,
+                "threshold_direction": "max",
+                "frequency": "quarterly",
+                "raw_text": sr_sec_lev_num.group(0).strip()
+            })
+        else:
+            # 1b. Clause without disclosed numeric threshold (requires explicit covenant/requirement/maintenance language)
+            sr_sec_lev_clause = re.search(
+                r"(?:covenant[s]?[^;\.\n]*?(?:require[s]?|maintain[ing]?|including|subject to)[^;\.\n]*?|maintain[ing]?(?:\s+(?:a|the))?\s+|shall not permit[^;\.\n]*?)(?:a\s+)?(maximum\s+(?:consolidated\s+)?senior\s+secured\s+leverage\s+ratio|consolidated\s+senior\s+secured\s+leverage\s+ratio|maximum\s+senior\s+secured\s+leverage\s+ratio)",
+                text,
+                re.IGNORECASE
+            )
+            if sr_sec_lev_clause:
+                _add_covenant({
+                    "name": "Maximum Consolidated Senior Secured Leverage Ratio",
+                    "covenant_type": "maintenance",
+                    "formula": "Consolidated Senior Secured Debt / EBITDA",
+                    "threshold": None,
+                    "threshold_direction": "max",
+                    "frequency": "quarterly",
+                    "raw_text": sr_sec_lev_clause.group(0).strip()
+                })
+
+        # 2. Maximum Consolidated Leverage Ratio (general)
+        # 2a. Numeric match (must be followed by ratio notation :1, x, times)
+        lev_match = re.search(
+            r"(?:consolidated\s+leverage\s+ratio|consolidated\s+leverage|leverage\s+ratio|debt\s+to\s+ebitda)[^\d]{1,150}?(\d+(?:\.\d+)?)\s*(?::\s*1(?:\.0+)?|\s*to\s*1(?:\.0+)?|\s*x\b|\s*times\b)",
+            text,
+            re.IGNORECASE
+        )
+        if lev_match and "Maximum Consolidated Senior Secured Leverage Ratio" not in covenant_names_seen:
             thresh = float(lev_match.group(1))
-            found.append({
+            _add_covenant({
                 "name": "Maximum Consolidated Leverage Ratio",
                 "covenant_type": "maintenance",
                 "formula": "Total Net Debt / EBITDA",
                 "threshold": thresh,
                 "threshold_direction": "max",
                 "frequency": "quarterly",
-                "raw_text": lev_match.group(0)
+                "raw_text": lev_match.group(0).strip()
             })
+        elif "Maximum Consolidated Senior Secured Leverage Ratio" not in covenant_names_seen:
+            # 2b. Clause without numeric threshold
+            lev_clause = re.search(
+                r"(?:covenant[s]?[^;\.\n]*?(?:require[s]?|maintain[ing]?|including|subject to)[^;\.\n]*?|maintain[ing]?(?:\s+(?:a|the))?\s+|shall not permit[^;\.\n]*?)(?:a\s+)?(maximum\s+(?:consolidated\s+)?leverage\s+ratio|consolidated\s+leverage\s+ratio)",
+                text,
+                re.IGNORECASE
+            )
+            if lev_clause:
+                _add_covenant({
+                    "name": "Maximum Consolidated Leverage Ratio",
+                    "covenant_type": "maintenance",
+                    "formula": "Total Net Debt / EBITDA",
+                    "threshold": None,
+                    "threshold_direction": "max",
+                    "frequency": "quarterly",
+                    "raw_text": lev_clause.group(0).strip()
+                })
 
-        # 2. Coverage covenant pattern
-        cov_match = re.search(r"(?:interest coverage|fixed charge coverage|dscr)[^\d]*(\d+\.?\d*)\s*:?\s*1\.?0?", text, re.IGNORECASE)
+        # 3. Minimum Interest Coverage Ratio
+        # 3a. Numeric match
+        cov_match = re.search(
+            r"(?:interest\s+coverage\s+ratio|interest\s+coverage|fixed\s+charge\s+coverage\s+ratio|fixed\s+charge\s+coverage|dscr)[^\d]{1,150}?(\d+(?:\.\d+)?)\s*(?::\s*1(?:\.0+)?|\s*to\s*1(?:\.0+)?|\s*x\b|\s*times\b)",
+            text,
+            re.IGNORECASE
+        )
         if cov_match:
             thresh = float(cov_match.group(1))
-            found.append({
+            _add_covenant({
                 "name": "Minimum Interest Coverage Ratio",
                 "covenant_type": "maintenance",
                 "formula": "EBITDA / Interest Expense",
                 "threshold": thresh,
                 "threshold_direction": "min",
                 "frequency": "quarterly",
-                "raw_text": cov_match.group(0)
+                "raw_text": cov_match.group(0).strip()
+            })
+        else:
+            # 3b. Clause without numeric threshold
+            cov_clause = re.search(
+                r"(?:covenant[s]?[^;\.\n]*?(?:require[s]?|maintain[ing]?|including|subject to)[^;\.\n]*?|maintain[ing]?(?:\s+(?:a|the))?\s+|shall maintain[^;\.\n]*?)(?:a\s+)?(minimum\s+interest\s+coverage(?:\s+ratio)?|interest\s+coverage\s+ratio|minimum\s+fixed\s+charge\s+coverage(?:\s+ratio)?)",
+                text,
+                re.IGNORECASE
+            )
+            if cov_clause:
+                _add_covenant({
+                    "name": "Minimum Interest Coverage Ratio",
+                    "covenant_type": "maintenance",
+                    "formula": "EBITDA / Interest Expense",
+                    "threshold": None,
+                    "threshold_direction": "min",
+                    "frequency": "quarterly",
+                    "raw_text": cov_clause.group(0).strip()
+                })
+
+        # 4. Minimum Liquidity
+        # 4a. Numeric match
+        liq_num = re.search(
+            r"(?:minimum\s+liquidity|maintain\s+liquidity|liquidity\s+covenant)[^\d$]{1,150}?\$?\s*([0-9,]+(?:\.[0-9]+)?)\s*(million|billion|k\b|thousand)",
+            text,
+            re.IGNORECASE
+        )
+        if liq_num and liq_num.group(1):
+            raw_num_str = liq_num.group(1).replace(",", "")
+            raw_num = float(raw_num_str) if raw_num_str else 0.0
+            unit = (liq_num.group(2) or "").lower()
+            if unit == "billion":
+                raw_num *= 1e9
+            elif unit == "million":
+                raw_num *= 1e6
+            elif unit in ("k", "thousand"):
+                raw_num *= 1e3
+            _add_covenant({
+                "name": "Minimum Liquidity",
+                "covenant_type": "maintenance",
+                "formula": "Cash and Cash Equivalents + Available Revolver Capacity",
+                "threshold": raw_num,
+                "threshold_direction": "min",
+                "frequency": "quarterly",
+                "raw_text": liq_num.group(0).strip()
+            })
+        else:
+            # 4b. Clause without numeric threshold
+            liq_clause = re.search(
+                r"(?:covenant[s]?[^;\.\n]*?(?:require[s]?|maintain[ing]?|including|subject to)[^;\.\n]*?|maintain[ing]?(?:\s+(?:a|the))?\s+|shall maintain[^;\.\n]*?)(?:a\s+)?(minimum\s+liquidity(?:\s+amount)?|liquidity\s+covenant|minimum\s+consolidated\s+liquidity)",
+                text,
+                re.IGNORECASE
+            )
+            if liq_clause:
+                _add_covenant({
+                    "name": "Minimum Liquidity",
+                    "covenant_type": "maintenance",
+                    "formula": "Cash and Cash Equivalents + Available Facility Commitments",
+                    "threshold": None,
+                    "threshold_direction": "min",
+                    "frequency": "quarterly",
+                    "raw_text": liq_clause.group(0).strip()
+                })
+
+        # 5. Financial Reporting Requirements
+        rep_clause = re.search(
+            r"(?:covenant[s]?[^;\.\n]*?(?:require[s]?|including|subject to|deliver|furnish)[^;\.\n]*?|affirmative\s+covenants?[^;\.\n]*?)(financial\s+reporting(?:\s+requirements)?|delivery\s+of\s+financial\s+statements|furnish\s+annual\s+and\s+quarterly\s+financial\s+statements)",
+            text,
+            re.IGNORECASE
+        )
+        if rep_clause:
+            _add_covenant({
+                "name": "Financial Reporting Requirements",
+                "covenant_type": "reporting",
+                "formula": "Delivery of periodic financial statements and compliance certificates",
+                "threshold": None,
+                "threshold_direction": None,
+                "frequency": "quarterly",
+                "raw_text": rep_clause.group(0).strip()
             })
 
-        # 3. Debt to Capitalization covenant pattern
-        cap_match = re.search(r"(?:debt to capitalization|debt to total capitalization|capitalization ratio)[^\d]*(\d+\.?\d*)\s*(?::\s*1\.?0?|%|\s)", text, re.IGNORECASE)
+        # 6. Debt to Capitalization covenant pattern
+        cap_match = re.search(
+            r"(?:debt\s+to\s+(?:total\s+)?capitalization(?:\s+ratio)?|capitalization\s+ratio)[^\d]{1,150}?(\d+(?:\.\d+)?)\s*(?::\s*1(?:\.0+)?|\s*to\s*1(?:\.0+)?|%|\s*percent)",
+            text,
+            re.IGNORECASE
+        )
         if cap_match:
             thresh = float(cap_match.group(1))
-            found.append({
+            _add_covenant({
                 "name": "Debt to Capitalization Ratio",
                 "covenant_type": "maintenance",
                 "formula": "Total Debt / Total Capitalization",
                 "threshold": thresh,
                 "threshold_direction": "max",
                 "frequency": "quarterly",
-                "raw_text": cap_match.group(0)
+                "raw_text": cap_match.group(0).strip()
             })
+        else:
+            cap_clause = re.search(
+                r"(?:covenant[s]?[^;\.\n]*?(?:require[s]?|maintain[ing]?|including|subject to)[^;\.\n]*?|maintain[ing]?(?:\s+(?:a|the))?\s+)(?:a\s+)?(maximum\s+debt\s+to\s+capitalization\s+ratio|debt\s+to\s+capitalization\s+ratio)",
+                text,
+                re.IGNORECASE
+            )
+            if cap_clause:
+                _add_covenant({
+                    "name": "Debt to Capitalization Ratio",
+                    "covenant_type": "maintenance",
+                    "formula": "Total Debt / Total Capitalization",
+                    "threshold": None,
+                    "threshold_direction": "max",
+                    "frequency": "quarterly",
+                    "raw_text": cap_clause.group(0).strip()
+                })
 
-        # 4. Tangible Net Worth covenant pattern
-        tnw_match = re.search(r"(?:tangible net worth|minimum net worth|consolidated net worth)[^\d$]*\$?\s*([0-9,]+(?:\.[0-9]+)?)\s*(million|billion|k)?", text, re.IGNORECASE)
-        if tnw_match:
+        # 7. Tangible Net Worth covenant pattern
+        tnw_match = re.search(
+            r"(?:tangible\s+net\s+worth|minimum\s+net\s+worth|consolidated\s+net\s+worth)[^\d$]{1,150}?\$?\s*([0-9,]+(?:\.[0-9]+)?)\s*(million|billion|k\b|thousand)",
+            text,
+            re.IGNORECASE
+        )
+        if tnw_match and tnw_match.group(1):
             raw_num_str = tnw_match.group(1).replace(",", "")
             raw_num = float(raw_num_str) if raw_num_str else 0.0
             unit = (tnw_match.group(2) or "").lower()
@@ -237,17 +416,33 @@ class CovenantAgent(BaseAgent):
                 raw_num *= 1e9
             elif unit == "million":
                 raw_num *= 1e6
-            elif unit == "k":
+            elif unit in ("k", "thousand"):
                 raw_num *= 1e3
-            found.append({
+            _add_covenant({
                 "name": "Tangible Net Worth",
                 "covenant_type": "maintenance",
                 "formula": "Total Assets - Intangibles - Total Liabilities",
                 "threshold": raw_num,
                 "threshold_direction": "min",
                 "frequency": "quarterly",
-                "raw_text": tnw_match.group(0)
+                "raw_text": tnw_match.group(0).strip()
             })
+        else:
+            tnw_clause = re.search(
+                r"(?:covenant[s]?[^;\.\n]*?(?:require[s]?|maintain[ing]?|including|subject to)[^;\.\n]*?|maintain[ing]?(?:\s+(?:a|the))?\s+)(?:a\s+)?(minimum\s+tangible\s+net\s+worth|tangible\s+net\s+worth\s+covenant)",
+                text,
+                re.IGNORECASE
+            )
+            if tnw_clause:
+                _add_covenant({
+                    "name": "Tangible Net Worth",
+                    "covenant_type": "maintenance",
+                    "formula": "Total Assets - Intangibles - Total Liabilities",
+                    "threshold": None,
+                    "threshold_direction": "min",
+                    "frequency": "quarterly",
+                    "raw_text": tnw_clause.group(0).strip()
+                })
 
         return found
 

@@ -113,3 +113,61 @@ class TestCovenantExtractionLineage:
         assert len(covs_single) == 1
         assert covs_double[0]["threshold"] == covs_single[0]["threshold"] == 3.5
 
+    def test_medallia_2021_filing_extracts_covenants_with_null_thresholds(self, covenant_agent):
+        """Case I: Medallia 2021 Form 10-K filing text identifying covenants without disclosed numerical thresholds."""
+        medallia_text = """
+        Note 8. Debt and Credit Facility
+        The Credit Agreement contains financial covenants that require the Company to maintain a minimum liquidity amount and a maximum consolidated senior secured leverage ratio.
+        As of January 31, 2021, the Company was in compliance with all financial covenants under the Credit Agreement.
+        """
+        covenants = covenant_agent._pattern_extract_covenants(medallia_text)
+        assert len(covenants) == 2, f"Expected exactly 2 covenants, found {len(covenants)}: {covenants}"
+        
+        cov_names = {c["name"] for c in covenants}
+        assert "Minimum Liquidity" in cov_names
+        assert "Maximum Consolidated Senior Secured Leverage Ratio" in cov_names
+
+        # Both covenants must have threshold=None (no invented/fabricated thresholds)
+        for cov in covenants:
+            assert cov["threshold"] is None
+            assert cov["covenant_type"] == "maintenance"
+            assert cov["raw_text"] != ""
+
+        liq_cov = next(c for c in covenants if c["name"] == "Minimum Liquidity")
+        assert liq_cov["threshold_direction"] == "min"
+
+        lev_cov = next(c for c in covenants if c["name"] == "Maximum Consolidated Senior Secured Leverage Ratio")
+        assert lev_cov["threshold_direction"] == "max"
+
+    def test_financial_reporting_requirements_covenant_extracted(self, covenant_agent):
+        """Case J: Affirmative covenant clause with financial reporting requirements."""
+        text = """
+        SECTION 5.01 Affirmative Covenants.
+        The Borrower shall comply with customary affirmative covenants, including financial reporting requirements to deliver quarterly unaudited and annual audited financial statements.
+        """
+        covenants = covenant_agent._pattern_extract_covenants(text)
+        assert len(covenants) == 1
+        assert covenants[0]["name"] == "Financial Reporting Requirements"
+        assert covenants[0]["covenant_type"] == "reporting"
+        assert covenants[0]["threshold"] is None
+        assert covenants[0]["threshold_direction"] is None
+
+    @pytest.mark.asyncio
+    async def test_covenant_agent_run_persists_covenants_with_null_threshold(self, covenant_agent):
+        """Case K: CovenantAgent.run pipeline execution saves null threshold without error."""
+        medallia_text = """
+        The Credit Agreement contains financial covenants that require the Company to maintain a minimum liquidity amount and a maximum consolidated senior secured leverage ratio.
+        """
+        state = {
+            "agreement_id": "agr-123",
+            "borrower_id": "bor-456",
+            "parsed_text": medallia_text,
+        }
+
+        res = await covenant_agent.run(state)
+        assert res["status"] == "covenants_extracted"
+        assert len(res["extracted_covenants"]) == 2
+        for cov in res["extracted_covenants"]:
+            assert cov["threshold"] is None
+
+
