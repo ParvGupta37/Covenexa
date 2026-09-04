@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     NEO4J_URI: str = "bolt://neo4j:7687"
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = "covenexa_neo4j_pass"
+    NEO4J_DATABASE: str | None = None
     REDIS_URL: str = "redis://:covenexa_redis_pass@redis:6379/0"
 
     # MCP Server

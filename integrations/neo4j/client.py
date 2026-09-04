@@ -28,11 +28,13 @@ class Neo4jClient:
         user: str,
         password: str,
         max_connection_pool_size: int = 50,
+        database: str | None = None,
     ) -> None:
         self._uri = uri
         self._user = user
         self._password = password
         self._max_pool = max_connection_pool_size
+        self._database = database
         self._driver: AsyncDriver | None = None
 
     def initialize(self) -> None:
@@ -52,20 +54,33 @@ class Neo4jClient:
     @asynccontextmanager
     async def session(
         self,
-        database: str = "neo4j",
+        database: str | None = None,
     ) -> AsyncGenerator[AsyncSession, None]:
         """Provide a managed Neo4j async session."""
         if self._driver is None:
             raise RuntimeError("Neo4jClient is not initialized. Call initialize() first.")
 
-        async with self._driver.session(database=database) as session:
+        # Determine target database: explicit parameter > instance default > settings.NEO4J_DATABASE > None
+        target_db = database if database is not None else self._database
+        if target_db is None:
+            try:
+                from app.core.config import settings
+                target_db = settings.NEO4J_DATABASE
+            except Exception:
+                target_db = None
+
+        session_kwargs = {}
+        if target_db:
+            session_kwargs["database"] = target_db
+
+        async with self._driver.session(**session_kwargs) as session:
             yield session
 
     async def execute_query(
         self,
         cypher: str,
         parameters: dict[str, Any] | None = None,
-        database: str = "neo4j",
+        database: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Execute a read/write Cypher query and return results as a list of dicts.
@@ -73,7 +88,7 @@ class Neo4jClient:
         Args:
             cypher: Cypher query string.
             parameters: Query parameters dict.
-            database: Target database name.
+            database: Target database name (None uses default).
 
         Returns:
             List of result records as dicts.

@@ -371,3 +371,60 @@ class TestCopilotHistory:
         assert res["id"] == conv_id
         mock_session.delete.assert_called_once_with(fake_conv)
         assert mock_session.commit.called
+
+    @pytest.mark.asyncio
+    async def test_query_copilot_persists_after_retriever_failure(self, org_a_admin):
+        """Verify that when the retriever experiences an error (handled in savepoint), Copilot persists messages and session.commit() succeeds."""
+        mock_session = AsyncMock()
+        mock_session.commit = AsyncMock()
+        mock_session.flush = AsyncMock()
+        mock_session.refresh = AsyncMock()
+
+        conv_id = str(uuid.uuid4())
+        fake_conv = CopilotConversationORM(
+            id=conv_id,
+            organization_id="org-a",
+            user_id="usr-a1",
+            borrower_id="borrower-apple",
+            title="New Conversation",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            messages=[],
+        )
+
+        mock_active_res = MagicMock()
+        mock_active_res.scalar_one_or_none.return_value = fake_conv
+        mock_session.execute = AsyncMock(return_value=mock_active_res)
+
+        mock_req = MagicMock()
+        mock_req.app.state.neo4j_client = None
+
+        with patch("app.api.v1.endpoints.copilot.CopilotAgent") as MockAgentClass:
+            mock_agent_instance = MagicMock()
+            # Simulate CopilotAgent returning synthesized fallback response when retriever returns empty/failed status
+            mock_agent_instance.run = AsyncMock(return_value={
+                "query": "What is the covenant status?",
+                "response": "No active covenants found for this borrower.",
+                "citations": ["### [SOURCE: LLM Fallback Analysis]"],
+                "hybrid_retrieval_status": {"sql": False, "graph": False, "vector": False},
+                "evidence_sources": {"sql_count": 0, "graph_count": 0, "vector_count": 0},
+            })
+            MockAgentClass.return_value = mock_agent_instance
+
+            payload = CopilotQueryRequest(
+                query="What is the covenant status?",
+                borrower_id="borrower-apple",
+                conversation_id=conv_id,
+            )
+
+            result = await query_copilot(
+                req=payload,
+                request=mock_req,
+                session=mock_session,
+                current_user=org_a_admin,
+            )
+
+            assert result["conversation_id"] == conv_id
+            assert result["response"] == "No active covenants found for this borrower."
+            assert mock_session.add.call_count == 2  # user_msg and assistant_msg added
+            assert mock_session.commit.called  # parent transaction committed successfully

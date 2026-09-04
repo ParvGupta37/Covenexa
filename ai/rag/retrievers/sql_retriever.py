@@ -75,6 +75,8 @@ class SqlRetriever(BaseRetriever):
             if not borrower_id:
                 return []
 
+            local_results: List[dict] = []
+
             # 1. Borrower Entity Profile
             res_b = await sess.execute(
                 text("SELECT id, company_name, sector, country, risk_rating_level, risk_rating_score FROM borrowers WHERE id = :b"),
@@ -83,7 +85,7 @@ class SqlRetriever(BaseRetriever):
             b = res_b.mappings().first()
             if b:
                 b_dict = dict(b)
-                results.append({
+                local_results.append({
                     "source": "postgres_sql",
                     "type": "borrower_profile",
                     "content": (
@@ -103,7 +105,7 @@ class SqlRetriever(BaseRetriever):
             if h:
                 h_dict = dict(h)
                 explanation_clean = _clean_json_str(h_dict.get("explanation"))
-                results.append({
+                local_results.append({
                     "source": "postgres_sql",
                     "type": "health_score",
                     "content": (
@@ -136,7 +138,7 @@ class SqlRetriever(BaseRetriever):
                 res_cov_direct = await sess.execute(
                     text("""
                         SELECT DISTINCT ON (c.name) 'UNKNOWN' as status, NULL as current_value, c.threshold as threshold_value, NULL as headroom_pct,
-                               c.description as reason, c.name as covenant_name, c.covenant_type, c.threshold_direction
+                               COALESCE(c.raw_text, c.formula, '') as reason, c.name as covenant_name, c.covenant_type, c.threshold_direction
                         FROM covenants c
                         JOIN agreements a ON a.id = c.agreement_id
                         JOIN loans l ON l.id = a.loan_id
@@ -150,7 +152,7 @@ class SqlRetriever(BaseRetriever):
 
             for c in covs:
                 c_dict = dict(c)
-                results.append({
+                local_results.append({
                     "source": "postgres_sql",
                     "type": "covenant_monitoring",
                     "content": (
@@ -173,7 +175,7 @@ class SqlRetriever(BaseRetriever):
             if r:
                 r_dict = dict(r)
                 risk_factors_clean = _clean_json_str(r_dict.get("risk_factors"))
-                results.append({
+                local_results.append({
                     "source": "postgres_sql",
                     "type": "risk_assessment",
                     "content": (
@@ -195,7 +197,7 @@ class SqlRetriever(BaseRetriever):
             f = res_fin.mappings().first()
             if f:
                 f_dict = dict(f)
-                results.append({
+                local_results.append({
                     "source": "postgres_sql",
                     "type": "financial_metrics",
                     "content": (
@@ -213,11 +215,12 @@ class SqlRetriever(BaseRetriever):
                     "metadata": f_dict,
                 })
 
-            return results
+            return local_results
 
         try:
             if session:
-                return await _query_with_session(session)
+                async with session.begin_nested():
+                    return await _query_with_session(session)
             elif self._client:
                 self._client.initialize()
                 async with self._client.session() as sess:

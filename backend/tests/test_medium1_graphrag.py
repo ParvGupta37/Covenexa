@@ -33,6 +33,14 @@ class MockSessionGraphRAG:
         self.risk = risk or {"default_probability": 22.5, "risk_category": "high", "confidence_score": 0.88, "z_score": 2.3, "risk_factors": '["High Leverage"]'}
         self.fin = fin or {"reporting_period": "FY 10-K", "revenue": 100_000_000, "ebitda": 20_000_000, "net_income": 5_000_000, "total_debt": 96_000_000, "net_debt": 80_000_000, "cash": 16_000_000, "interest_expense": None, "leverage_ratio": 4.8, "interest_coverage": None, "dscr": None}
 
+    def begin_nested(self):
+        class _NestedCtx:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return False
+        return _NestedCtx()
+
     async def execute(self, stmt, params=None):
         sql = str(stmt).upper()
 
@@ -311,3 +319,138 @@ async def test_evidence_context_and_no_hallucination():
     assert "### [SOURCE: Neo4j Knowledge Graph]" in prompt
     assert "### [SOURCE: Pinecone Vector Search]" in prompt
     assert "NEVER claim to have retrieved information from a source marked as unavailable" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_sql_retriever_covenant_fallback_query():
+    """Verify SqlRetriever falls back to covenants table using raw_text as reason when covenant_monitoring is empty."""
+    class MockFallbackSession:
+        def begin_nested(self):
+            class _NestedCtx:
+                async def __aenter__(self):
+                    return self
+                async def __aexit__(self, exc_type, exc_val, exc_tb):
+                    return False
+            return _NestedCtx()
+
+        async def execute(self, stmt, params=None):
+            sql = str(stmt).upper()
+
+            class MockResult:
+                def __init__(self, rows):
+                    self._rows = rows
+                def mappings(self):
+                    return self
+                def first(self):
+                    return self._rows[0] if self._rows else None
+                def all(self):
+                    return self._rows
+
+            if "FROM BORROWERS" in sql:
+                return MockResult([{"id": "b1", "company_name": "Acme Corp", "sector": "Tech", "country": "USA", "risk_rating_level": "Moderate", "risk_rating_score": 6.5}])
+            elif "FROM BORROWER_HEALTH_SCORES" in sql:
+                return MockResult([])
+            elif "FROM COVENANT_MONITORING" in sql:
+                return MockResult([])  # Empty monitoring records -> triggers fallback
+            elif "FROM COVENANTS C" in sql:
+                # Fallback query returns covenant with raw_text
+                return MockResult([{
+                    "status": "UNKNOWN",
+                    "current_value": None,
+                    "threshold_value": 3.5,
+                    "headroom_pct": None,
+                    "reason": "Borrower shall maintain a Maximum Leverage Ratio not exceeding 3.50:1.00.",
+                    "covenant_name": "Maximum Leverage Ratio",
+                    "covenant_type": "leverage",
+                    "threshold_direction": "max",
+                }])
+            elif "FROM RISK_ASSESSMENTS" in sql:
+                return MockResult([])
+            elif "FROM FINANCIAL_METRICS" in sql:
+                return MockResult([])
+            return MockResult([])
+
+    session = MockFallbackSession()
+    retriever = SqlRetriever()
+    results = await retriever.retrieve("Check covenants", borrower_id="b1", session=session)
+
+    cov_item = next((r for r in results if r["type"] == "covenant_monitoring"), None)
+    assert cov_item is not None
+    assert "Covenant: Maximum Leverage Ratio | Status: UNKNOWN" in cov_item["content"]
+    assert "Threshold: 3.50x (max)" in cov_item["content"]
+    assert "Detail: Borrower shall maintain a Maximum Leverage Ratio not exceeding 3.50:1.00." in cov_item["content"]
+
+
+@pytest.mark.asyncio
+async def test_sql_retriever_savepoint_isolation_on_failure():
+    """Verify SqlRetriever isolates query failures inside a nested transaction savepoint without poisoning outer session."""
+    savepoint_rolled_back = False
+
+    class MockFailingSession:
+        def begin_nested(self):
+            class _NestedCtx:
+                async def __aenter__(self):
+                    return self
+                async def __aexit__(self, exc_type, exc_val, exc_tb):
+                    nonlocal savepoint_rolled_back
+                    if exc_type is not None:
+                        savepoint_rolled_back = True
+                    return False  # Let exception propagate to retriever's try/except
+            return _NestedCtx()
+
+        async def execute(self, stmt, params=None):
+            raise Exception("asyncpg.exceptions.UndefinedColumnError: column c.description does not exist")
+
+    session = MockFailingSession()
+    retriever = SqlRetriever()
+    results = await retriever.retrieve("Check covenants", borrower_id="b1", session=session)
+    assert results == []
+    assert savepoint_rolled_back is True
+
+
+@pytest.mark.asyncio
+async def test_neo4j_client_configured_database():
+    """Verify Neo4jClient passes database parameter when configured."""
+    from integrations.neo4j.client import Neo4jClient
+
+    client = Neo4jClient(uri="bolt://localhost:7687", user="neo4j", password="pw", database="custom_db")
+    mock_driver = MagicMock()
+    mock_session_ctx = MagicMock()
+    mock_session = AsyncMock()
+    mock_session_ctx.__aenter__.return_value = mock_session
+    mock_session_ctx.__aexit__.return_value = None
+    mock_driver.session = MagicMock(return_value=mock_session_ctx)
+    client._driver = mock_driver
+
+    async with client.session() as sess:
+        pass
+
+    mock_driver.session.assert_called_once_with(database="custom_db")
+
+
+@pytest.mark.asyncio
+async def test_neo4j_client_default_database_when_unset():
+    """Verify Neo4jClient uses server default database when NEO4J_DATABASE is unset/None."""
+    from integrations.neo4j.client import Neo4jClient
+    from app.core.config import settings
+
+    original_db = settings.NEO4J_DATABASE
+    try:
+        settings.NEO4J_DATABASE = None
+        client = Neo4jClient(uri="bolt://localhost:7687", user="neo4j", password="pw")
+        mock_driver = MagicMock()
+        mock_session_ctx = MagicMock()
+        mock_session = AsyncMock()
+        mock_session_ctx.__aenter__.return_value = mock_session
+        mock_session_ctx.__aexit__.return_value = None
+        mock_driver.session = MagicMock(return_value=mock_session_ctx)
+        client._driver = mock_driver
+
+        async with client.session() as sess:
+            pass
+
+        # Should be called with no database kwarg
+        mock_driver.session.assert_called_once_with()
+    finally:
+        settings.NEO4J_DATABASE = original_db
+
