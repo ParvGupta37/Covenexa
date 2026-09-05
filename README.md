@@ -1,143 +1,141 @@
-# Covenexa — AI-Native Private Credit Risk & Covenant Intelligence Platform
+# Covenexa
 
-Covenexa is an enterprise AI credit intelligence platform for private credit lenders, institutional credit officers, and portfolio managers. It automates credit risk evaluation, covenant compliance monitoring, SEC EDGAR document ingestion, and conversational Q&A using an active **Hybrid GraphRAG** architecture.
+### AI-Powered Covenant Monitoring & Credit Risk Intelligence Platform
 
----
+> **From borrower documents to continuously monitored credit intelligence.**
 
-## Key Capabilities
+Covenexa is an AI-powered credit intelligence platform designed for private credit teams and lenders.
 
-1. **Active Hybrid GraphRAG Engine**:
-   - **PostgreSQL**: Authoritative structured financial metrics, leverage ratios, and covenant monitoring statuses.
-   - **Pinecone**: Vector similarity search over SEC EDGAR filings and credit agreement text passages using Cohere 1024-dimensional embeddings (`embed-english-v3.0`).
-   - **Neo4j**: Knowledge Graph traversal across Borrower ──► Loan ──► Agreement ──► Covenant ──► Risk relationships.
-2. **Deterministic Risk Intelligence Pipeline**:
-   - **HealthScoreEngine**: Multi-factor borrower health scoring (0–100) with historical trend tracking (`None` / `N/A` for first-run data).
-   - **DefaultPredictor**: Evidence-grounded default probability estimation with explicit 5.0% baseline transparency.
-   - **CovenantMonitor**: Automated ratio monitoring against maintenance thresholds using extracted covenant formulas.
-   - **RecommendationEngine**: Idempotent, non-redundant credit action recommendations.
-3. **Document & SEC Ingestion Pipeline**:
-   - Direct PDF/DOCX credit agreement upload parsing.
-   - Live SEC EDGAR filing ingestion with strict URL validation and User-Agent headers.
-4. **Conversational AI Copilot**:
-   - Cohere Command model synthesis grounded strictly in retrieved multi-source evidence citations (`[PostgreSQL]`, `[Pinecone]`, `[Neo4j]`).
-5. **Executive Credit Memorandum Generation**:
-   - Automated memo generation with complete data integrity (preserving `None` / `N/A` semantics for un-analyzed borrowers).
+It transforms fragmented loan agreements, financial statements, SEC filings, and borrower data into a structured, continuously updated risk layer — enabling teams to extract covenants, monitor compliance, assess borrower health, run stress scenarios, explore relationships through a knowledge graph, and interact with credit data through an evidence-grounded AI Copilot.
 
 ---
 
-## System Architecture
+## 🚀 Why Covenexa?
 
-```
-User / Frontend (React + TypeScript)
-       │
-       ▼
-FastAPI Backend (Async SQLAlchemy + Pydantic v2 + JWT RBAC)
-       │
-  ┌────┼───────────────────────────┐
-  │    │                           │
-  ▼    ▼                           ▼
-PostgreSQL (Authoritative)  Pinecone (Vector 1024-dim)  Neo4j (Knowledge Graph)
-  │    │                           │
-  └────┴─────────────┬─────────────┘
-                     │
-                     ▼
-          Hybrid Retriever Factory
-                     │
-                     ▼
-           Cohere Command LLM
-```
+Credit analysis is still heavily dependent on manually reviewing large volumes of unstructured information.
+
+A single borrower can have:
+
+- 📄 Hundreds of pages of loan agreements
+- 📊 Financial statements spread across different documents
+- 🏦 Multiple loan facilities and covenant structures
+- 📰 SEC filings containing relevant financial information
+- 🔗 Relationships between borrowers, facilities, agreements, covenants, and financial metrics
+
+The problem isn't a lack of data.
+
+**It's the fragmentation of that data.**
+
+Covenexa converts this fragmented information into a connected credit intelligence layer that can be continuously analyzed.
 
 ---
 
-## Tech Stack
+## ⚡ What Covenexa Does
 
-- **Backend**: Python 3.11, FastAPI, SQLAlchemy 2.0 (Asyncpg), Pydantic v2, Structlog
-- **Databases**: PostgreSQL 17, Neo4j 5 (Bolt), Redis 7, Pinecone Vector Database
-- **AI/LLM**: Cohere Command (`command-a-03-2025`), Cohere Embed (`embed-english-v3.0`, 1024 dimensions)
-- **Frontend**: React 18, TypeScript, Vite, TailwindCSS, Lucide Icons, Recharts, Zustand
-- **Event Bus**: Redis Pub/Sub Event Bus
+### 1. Document Intelligence
 
----
+Upload credit agreements, financial statements, and other borrower documents.
 
-## Getting Started
+Covenexa processes documents and extracts relevant financial and contractual information using LLM-powered pipelines.
 
-### Prerequisites
+**Extracted information includes:**
 
-- Python 3.11+
-- Node.js 18+
-- PostgreSQL 15+
-- Neo4j 5+ (optional, degrades gracefully if offline)
-- Redis 6+
-
-### Environment Configuration
-
-Copy `.env.example` to `.env` in the project root:
-
-```bash
-cp .env.example .env
-```
-
-Configure required service credentials in `.env`:
-```env
-DATABASE_URL=postgresql+asyncpg://covenexa_user:covenexa_pass@localhost:5432/covenexa
-COHERE_API_KEY=your_cohere_api_key
-PINECONE_API_KEY=your_pinecone_api_key
-PINECONE_INDEX_NAME=covenexa-docs
-NEO4J_URI=bolt://localhost:7687
-```
-
-### Backend Setup
-
-```bash
-cd backend
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Run database migrations:
-```bash
-alembic upgrade head
-```
-
-Run backend dev server:
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### Frontend Setup
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-The frontend will run on `http://localhost:5173`.
+- Revenue
+- EBITDA
+- Debt
+- Interest expense
+- Financial ratios
+- Covenant clauses
+- Thresholds
+- Compliance requirements
+- Supporting evidence
 
 ---
 
-## Running Tests & Type Checks
+### 2. AI Covenant Extraction
 
-### Backend Unit & Integration Tests (Pytest)
-```bash
-cd backend
-source .venv/bin/activate
-PYTHONPATH=..:. pytest tests/ -v
-```
+Covenexa identifies financial and contractual covenants from borrower documentation.
 
-### Frontend TypeScript Verification
-```bash
-cd frontend
-npx tsc --noEmit
-```
+Examples include:
+
+- Maximum Leverage Ratio
+- Minimum Interest Coverage
+- Debt-to-Capitalization
+- Minimum Liquidity
+- Tangible Net Worth
+- Financial Reporting Requirements
+- Affirmative Covenants
+- Negative Covenants
+
+Every extracted covenant is tied back to its supporting document evidence.
+
+Covenexa is explicitly designed to **avoid inventing covenant values when the source does not disclose them.**
 
 ---
 
-## Security & Tenant Isolation Rules
+### 3. Covenant Monitoring
 
-1. **Tenant Isolation**: Vector retrieval for a specific borrower strictly filters by `borrower_id` in Pinecone metadata. If no chunks exist, an empty list `[]` is returned (no cross-tenant fallback).
-2. **Path Traversal Protection**: Uploaded filenames are sanitized with `os.path.basename()` before writing to local disk volumes.
-3. **SSRF Protection**: SEC EDGAR URL ingestion enforces strict `urllib.parse` domain parsing against allowed domains (`sec.gov`, `cloudfront.net`).
-4. **Data Integrity (`None ≠ 0`)**: Missing or uncalculated financial metrics, health scores, and default probabilities remain `None` internally and display as `"N/A"` in UI/reports. Legitimate measured zero values remain `0`.
-5. **RBAC**: All credit entity endpoints (`/borrowers/`, `/organizations/`, `/loans/`, `/documents/`, `/risk/`, `/reports/`) require authenticated JWT Bearer tokens with authorized roles (`ADMIN`, `MANAGER`, `ANALYST`).
+Once covenants are extracted and financial data is available, Covenexa continuously evaluates borrower compliance.
+
+The Risk Monitor provides visibility into:
+
+- ✅ Compliant covenants
+- ⚠️ At-risk covenants
+- 🔴 Breached covenants
+- Covenant headroom
+- Current financial values
+- Thresholds
+- Supporting evidence
+- Risk recommendations
+
+---
+
+### 4. Borrower Health & Default Risk
+
+Covenexa combines financial metrics and covenant information to create a broader borrower risk picture.
+
+The platform evaluates:
+
+- Financial performance
+- Leverage
+- Coverage
+- Covenant health
+- Liquidity
+- Historical information
+- Risk indicators
+
+This enables earlier identification of deteriorating borrower conditions.
+
+---
+
+### 5. Portfolio Stress Testing
+
+Credit teams can evaluate how borrowers and portfolios respond to adverse scenarios.
+
+Stress scenarios can be applied to financial conditions to understand their potential impact on:
+
+- Revenue
+- EBITDA
+- Debt
+- Financial ratios
+- Covenant compliance
+- Overall borrower risk
+
+---
+
+### 6. Knowledge Graph
+
+Covenexa maintains relationships between credit entities using a graph-based intelligence layer.
+
+```text
+Borrower
+   │
+   ├── Loan Facility
+   │      │
+   │      └── Credit Agreement
+   │              │
+   │              ├── Covenants
+   │              ├── Financial Metrics
+   │              └── Documents
+   │
+   └── Historical Financial Data
